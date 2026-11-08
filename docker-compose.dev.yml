@@ -11,6 +11,8 @@ x-backend: &backend
     # Built from POSTGRES_* so the password has one source (D29); overrides the localhost values in .env.
     CHIRPO_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-chirpo}:${POSTGRES_PASSWORD:-chirpo}@db:5432/${POSTGRES_DB:-chirpo}
     CHIRPO_REDIS_URL: redis://redis:6379/0
+    # Only Caddy can reach the API (port not published), so its forwarded headers are trusted.
+    CHIRPO_TRUSTED_PROXIES: "*"
   volumes:
     - ./backend/src:/app/src
     - ./backend/alembic:/app/alembic
