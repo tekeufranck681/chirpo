@@ -2,9 +2,11 @@
 
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
+from uuid import UUID
 
 from chirpo.core.domain import (
     ChatRef,
+    ChatUser,
     InboundEvent,
     Issue,
     IssuePatch,
@@ -19,6 +21,8 @@ from chirpo.core.domain import (
     RepoRef,
     SentMessage,
 )
+from chirpo.core.permissions import Role
+from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
 
 class MessagingAdapter(Protocol):
@@ -99,3 +103,46 @@ class CodeHostAdapter(Protocol):
     ) -> MergeResult: ...
 
     async def aclose(self) -> None: ...
+
+
+class Workspaces(Protocol):
+    """A chat belongs to at most one workspace, which has linked repos (one is the default)."""
+
+    async def for_chat(self, chat: ChatRef) -> Workspace | None: ...
+
+    async def get_or_create_for_chat(self, chat: ChatRef, *, name: str) -> Workspace: ...
+
+    async def repos(self, workspace_id: UUID) -> list[LinkedRepo]:
+        """The default repo first, then the others in the order they were linked."""
+        ...
+
+    async def link_repo(
+        self, workspace_id: UUID, repo: RepoRef, *, installation_id: int | None = None
+    ) -> LinkedRepo:
+        """The first linked repo becomes the default. Linking again returns the existing link."""
+        ...
+
+    async def unlink_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
+        """False if it wasn't linked. Unlinking the default promotes the oldest remaining repo."""
+        ...
+
+
+class Members(Protocol):
+    async def for_chat_user(self, workspace_id: UUID, user: ChatUser) -> Member:
+        """The member behind this chat account, created as a plain member on first contact."""
+        ...
+
+    async def all(self, workspace_id: UUID) -> list[Member]: ...
+
+    async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None: ...
+
+    async def link_codehost(
+        self, workspace_id: UUID, member_id: UUID, account: CodeHostAccount
+    ) -> Member | None:
+        """Attach a verified account, replacing the member's previous one. If another member had
+        this account, it moves to this member (e.g. the person changed chat account)."""
+        ...
+
+
+class AuditLog(Protocol):
+    async def record(self, entry: AuditEntry) -> None: ...
