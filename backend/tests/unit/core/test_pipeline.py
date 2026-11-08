@@ -71,3 +71,15 @@ async def test_button_presses_are_ignored_for_now() -> None:
 def test_timestamps_must_carry_a_timezone() -> None:
     with pytest.raises(ValidationError):
         make_message("/ping", sent_at=datetime(2026, 1, 1))
+
+
+async def test_process_handles_an_event_once() -> None:
+    from chirpo.core.pipeline import process
+    from tests.fakes import FakeProcessedEvents
+
+    messaging, processed = FakeMessaging(), FakeProcessedEvents()
+    message = make_message("/ping")
+
+    assert await process(message, messaging, processed) is True
+    assert await process(message, messaging, processed) is False
+    assert len(messaging.sent) == 1

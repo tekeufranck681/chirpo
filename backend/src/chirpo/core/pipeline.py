@@ -8,7 +8,7 @@ from types import MappingProxyType
 
 from chirpo.core import messages
 from chirpo.core.domain import InboundEvent, InboundMessage
-from chirpo.core.ports import MessagingAdapter
+from chirpo.core.ports import MessagingAdapter, ProcessedEvents
 from chirpo.core.router import is_explicitly_addressed, parse_command
 
 COMMAND_REPLIES: Mapping[str, str] = MappingProxyType(
@@ -38,3 +38,17 @@ async def handle_inbound(event: InboundEvent, messaging: MessagingAdapter) -> No
     reply = _reply_for(event)
     if reply is not None:
         await messaging.send_message(event.chat, reply, reply_to=event.message_id)
+
+
+async def process(
+    event: InboundEvent, messaging: MessagingAdapter, processed: ProcessedEvents
+) -> bool:
+    """Handle an event exactly once. Returns False for a duplicate delivery.
+
+    The claim comes first: if handling then fails, the event is not retried, so a bot reply or an
+    action is never repeated (at-most-once after the claim, D31).
+    """
+    if not await processed.claim(messaging.event_source, event.event_id):
+        return False
+    await handle_inbound(event, messaging)
+    return True

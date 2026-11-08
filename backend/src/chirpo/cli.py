@@ -1,8 +1,11 @@
-"""The `chirpo` command: `chirpo api`, `chirpo worker`, `chirpo migrate`."""
+"""The `chirpo` command: `chirpo api`, `chirpo worker`, `chirpo poll`, `chirpo migrate`."""
 
 import argparse
+import asyncio
+import contextlib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from chirpo.config import get_settings
 
@@ -40,6 +43,49 @@ def run_worker(_args: argparse.Namespace) -> None:
     )
 
 
+def run_poll(_args: argparse.Namespace) -> None:
+    # Ctrl-C / watchfiles reload: stop quietly. The offset is saved per update, so nothing is lost.
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(_poll())
+
+
+async def _poll() -> None:
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
+    from chirpo.adapters.messaging.telegram.poller import run_poller
+    from chirpo.db.repositories import SqlPollCursors
+    from chirpo.db.session import create_engine, create_session_factory
+    from chirpo.logging import configure_logging, get_logger, init_sentry
+
+    settings = get_settings()
+    configure_logging(settings)
+    init_sentry(settings)
+    log = get_logger("chirpo.poll")
+    if settings.telegram_mode != "polling":
+        log.info("telegram_polling_disabled", mode=settings.telegram_mode)
+        return
+    if settings.telegram_bot_token is None:
+        log.warning("telegram_not_configured", hint="set CHIRPO_TELEGRAM_BOT_TOKEN in .env")
+        return
+
+    adapter = await TelegramAdapter.connect(settings.telegram_bot_token.get_secret_value())
+    engine = create_engine(settings)
+    queue = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+
+    async def enqueue(raw: dict[str, Any], update_id: int) -> None:
+        job_id = f"{adapter.event_source}:{update_id}"
+        await queue.enqueue_job("handle_update", adapter.platform, raw, _job_id=job_id)
+
+    try:
+        await run_poller(adapter, SqlPollCursors(create_session_factory(engine)), enqueue)
+    finally:
+        await queue.aclose()
+        await engine.dispose()
+        await adapter.aclose()
+
+
 def run_migrate(_args: argparse.Namespace) -> None:
     from alembic import command
     from alembic.config import Config
@@ -59,6 +105,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("worker", help="run the background job worker").set_defaults(
         handler=run_worker
+    )
+    commands.add_parser("poll", help="receive Telegram updates by long polling").set_defaults(
+        handler=run_poll
     )
     commands.add_parser("migrate", help="apply database migrations").set_defaults(
         handler=run_migrate

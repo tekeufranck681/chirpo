@@ -36,6 +36,7 @@ def make_callback(data: str) -> InboundCallback:
 
 class FakeMessaging:
     platform = "fake"
+    event_source = "fake:bot"
 
     def __init__(self) -> None:
         self.sent: list[tuple[ChatRef, str, str | None]] = []
@@ -52,3 +53,29 @@ class FakeMessaging:
 
     async def edit_message(self, message: SentMessage, text: str) -> None:
         self.edited.append((message, text))
+
+    async def aclose(self) -> None:
+        pass
+
+
+class FakeProcessedEvents:
+    def __init__(self) -> None:
+        self.claimed: set[tuple[str, str]] = set()
+
+    async def claim(self, source: str, external_id: str) -> bool:
+        key = (source, external_id)
+        if key in self.claimed:
+            return False
+        self.claimed.add(key)
+        return True
+
+
+class FakePollCursors:
+    def __init__(self) -> None:
+        self.values: dict[tuple[str, str], str] = {}
+
+    async def get(self, source: str, scope: str) -> str | None:
+        return self.values.get((source, scope))
+
+    async def set(self, source: str, scope: str, cursor: str) -> None:
+        self.values[(source, scope)] = cursor

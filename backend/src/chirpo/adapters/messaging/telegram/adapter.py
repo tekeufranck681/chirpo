@@ -35,6 +35,7 @@ from chirpo.core.errors import (
 from chirpo.logging import get_logger
 
 PLATFORM = "telegram"
+ALLOWED_UPDATES = ("message", "callback_query")
 TELEGRAM_SERVICE_USER_ID = 777000  # posts auto-forwarded from a linked channel
 LEADING_COMMAND = re.compile(r"^(?P<command>/[A-Za-z0-9_]{1,32})@(?P<target>[A-Za-z0-9_]+)")
 REPEATED_SPACES = re.compile(r"[ \t]{2,}")
@@ -50,6 +51,7 @@ class TelegramAdapter:
             raise MessagingError("the Telegram bot has no username")
         self._bot = bot
         self._bot_id = bot_id
+        self.event_source = f"{PLATFORM}:{bot_id}"
         self._bot_username = bot_username
         self._mention = re.compile(rf"(?<!\w)@{re.escape(bot_username)}\b", re.IGNORECASE)
 
@@ -59,6 +61,19 @@ class TelegramAdapter:
         bot = Bot(token)
         me = await _translate_errors(bot.get_me)
         return cls(bot, bot_id=me.id, bot_username=me.username or "")
+
+    @property
+    def bot_id(self) -> int:
+        return self._bot_id
+
+    async def fetch_updates(self, offset: int | None, wait_seconds: int) -> list[dict[str, Any]]:
+        """Long polling: Telegram holds the request up to `wait_seconds` until updates arrive."""
+        updates = await _translate_errors(
+            lambda: self._bot.get_updates(
+                offset=offset, timeout=wait_seconds, allowed_updates=list(ALLOWED_UPDATES)
+            )
+        )
+        return [update.to_dict() for update in updates]
 
     async def aclose(self) -> None:
         await self._bot.shutdown()
