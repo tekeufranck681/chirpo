@@ -24,13 +24,27 @@ Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker.
 The repo has three parts: `backend/` (Python API and worker), `dashboard/` (React web app, coming
 later), and `deploy/` (Docker Compose and the Caddy web server, coming later).
 
+First time (Docker commands run from the repo root; `COMPOSE_FILE` in `.env` makes `docker compose`
+mean `docker compose -f docker-compose.dev.yml`):
+
 ```bash
+cp .env.example .env            # then set CHIRPO_ENCRYPTION_KEY (the file explains how)
+docker compose up -d            # from the repo root: Postgres (localhost:5433), Redis
+                                # (localhost:6380), Adminer database GUI (http://localhost:8081)
 cd backend
 uv sync                         # install dependencies
 uv run pre-commit install       # run checks before each commit (once per clone)
-uv run pytest                   # tests
+uv run alembic upgrade head     # create the database tables
+```
+
+Everyday commands (from `backend/`):
+
+```bash
+uv run pytest                   # all tests (database tests need `docker compose up -d`)
+uv run pytest tests/unit        # fast tests only, no database needed
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
+uv run alembic revision --autogenerate -m "describe the change"   # after changing models
 ```
 
 Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/)
