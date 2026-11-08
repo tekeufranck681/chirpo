@@ -266,3 +266,22 @@ async def test_rejected_credentials_are_explained(github: respx.MockRouter) -> N
 def test_empty_dev_token_is_not_a_login() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         GitHubAuth(token="")
+
+
+async def test_github_reason_is_kept_for_refusals(github: respx.MockRouter) -> None:
+    github.get("/user").respond(422, json={"message": "Validation Failed"})
+    with pytest.raises(CodeHostValidationError, match="422: Validation Failed"):
+        await token_auth().whoami()
+
+
+async def test_server_error_bodies_are_not_repeated(github: respx.MockRouter) -> None:
+    github.get("/user").respond(502, json={"message": "<html>bad gateway</html>"})
+    with pytest.raises(CodeHostUnavailableError) as caught:
+        await token_auth().whoami()
+    assert "html" not in str(caught.value)
+
+
+def test_graphql_reads_are_retried_after_a_server_error() -> None:
+    request = httpx.Request("POST", f"{API}/graphql")
+    exc = RequestFailed(Response(httpx.Response(502, request=request), Any))
+    assert retry_policy(exc, 0).do_retry

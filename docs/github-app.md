@@ -100,6 +100,14 @@ Can reach owner/repo (private repo)
 | `The GitHub App is not installed on owner/repo` | Install the App on that repo (step 3) and check the spelling. |
 | `GitHub rejected chirpo's credentials (401)` | The App ID doesn't match the key, or the key was deleted. |
 
+To see the repo the way chirpo does (open issues, and open pull requests with their CI result,
+approvals and mergeability):
+
+```bash
+uv run chirpo github demo owner/repo           # read-only
+uv run chirpo github demo owner/repo --write   # also creates, comments on and closes a test issue
+```
+
 ## Development shortcut: a personal access token
 
 For quick local experiments you can skip the App and create a

@@ -14,18 +14,24 @@ from githubkit import AppAuthStrategy
 from chirpo.adapters.codehost.github.adapter import MAX_ISSUE_PAGES, PAGE_SIZE, GitHubAdapter
 from chirpo.adapters.codehost.github.auth import GitHubAuth
 from chirpo.core.domain import (
+    CheckStatus,
     CloseReason,
     IssuePatch,
     IssueQuery,
     IssueState,
     LabelSpec,
+    MergeMethod,
     NewIssue,
+    PullRequestQuery,
+    PullRequestState,
     RepoPermission,
     RepoRef,
 )
 from chirpo.core.errors import (
+    CodeHostConflictError,
     CodeHostForbiddenError,
     CodeHostNotFoundError,
+    CodeHostUnavailableError,
     CodeHostValidationError,
 )
 from tests.integration.github_api import mocked_github, payload
@@ -354,3 +360,217 @@ async def test_issue_list_gives_up_after_the_page_cap(
     route = github.get(ISSUES).respond(json=[pull_request] * PAGE_SIZE)
     assert await adapter.list_issues(REPO, IssueQuery()) == []
     assert route.call_count == MAX_ISSUE_PAGES
+
+
+# ------------------------------------------------------------------ pull requests
+
+GRAPHQL = "/graphql"
+
+
+def pr_node(**changes: Any) -> dict[str, Any]:
+    node = payload("graphql_pull_request")["data"]["repository"]["pullRequest"]
+    return {**node, **changes}
+
+
+def graphql_variables(route: respx.Route) -> dict[str, Any]:
+    return sent(route)["variables"]
+
+
+async def test_get_pull_request_from_real_payload(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    route = github.post(GRAPHQL).respond(json=payload("graphql_pull_request"))
+
+    pull = await adapter.get_pull_request(REPO, 12)
+
+    assert graphql_variables(route) == {"owner": "tekeufranck681", "name": "chirpo", "number": 12}
+    assert (pull.number, pull.state, pull.checks) == (
+        12,
+        PullRequestState.MERGED,
+        CheckStatus.PASSING,
+    )
+    assert (pull.head_branch, pull.base_branch, pull.author) == (
+        "feat/github-issues",
+        "main",
+        "tekeufranck681",
+    )
+    assert pull.mergeable is None  # GitHub answers UNKNOWN for merged PRs
+    assert (pull.approvals, pull.changes_requested, pull.draft) == (0, False, False)
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({"mergeable": "CONFLICTING"}, {"mergeable": False}),
+        ({"mergeable": "MERGEABLE", "isDraft": True}, {"mergeable": True, "draft": True}),
+        (
+            {"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}},
+            {"checks": CheckStatus.FAILING},
+        ),
+        (
+            {"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]}},
+            {"checks": CheckStatus.PENDING},
+        ),
+        (
+            {"commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}},
+            {"checks": CheckStatus.NONE},
+        ),
+        (
+            {"latestOpinionatedReviews": {"nodes": [{"state": "APPROVED"}, {"state": "APPROVED"}]}},
+            {"approvals": 2, "changes_requested": False},
+        ),
+        (
+            {
+                "latestOpinionatedReviews": {
+                    "nodes": [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]
+                }
+            },
+            {"approvals": 1, "changes_requested": True},
+        ),
+        ({"author": None}, {"author": None}),
+    ],
+)
+async def test_pull_request_details(
+    adapter: GitHubAdapter,
+    github: respx.MockRouter,
+    changes: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    node = pr_node(state="OPEN", **changes)
+    github.post(GRAPHQL).respond(json={"data": {"repository": {"pullRequest": node}}})
+    pull = await adapter.get_pull_request(REPO, 12)
+    assert pull.state == PullRequestState.OPEN
+    assert {key: getattr(pull, key) for key in expected} == expected
+
+
+async def test_get_pull_request_on_an_issue_number_is_not_found(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.post(GRAPHQL).respond(json=payload("graphql_not_found"))
+    with pytest.raises(CodeHostNotFoundError, match="Could not resolve to a PullRequest"):
+        await adapter.get_pull_request(REPO, 99)
+
+
+@pytest.mark.parametrize(
+    ("state", "states"),
+    [("open", ["OPEN"]), ("closed", ["CLOSED", "MERGED"]), ("all", None)],
+)
+async def test_list_pull_requests_sends_states(
+    adapter: GitHubAdapter, github: respx.MockRouter, state: str, states: list[str] | None
+) -> None:
+    route = github.post(GRAPHQL).respond(json=payload("graphql_pull_requests"))
+    pulls = await adapter.list_pull_requests(REPO, PullRequestQuery(state=state, limit=3))  # type: ignore[arg-type]
+    assert [pull.number for pull in pulls] == [12, 11, 10]
+    assert graphql_variables(route) == {
+        "owner": "tekeufranck681",
+        "name": "chirpo",
+        "states": states,
+        "first": 3,
+        "after": None,
+    }
+
+
+async def test_list_pull_requests_by_author_reads_more_pages(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    first_page = payload("graphql_pull_requests")
+    last_page = payload("graphql_pull_requests")
+    connection = last_page["data"]["repository"]["pullRequests"]
+    connection["pageInfo"] = {"hasNextPage": False, "endCursor": None}
+    connection["nodes"][0]["author"] = {"login": "Kevin", "__typename": "User"}
+    route = github.post(GRAPHQL).mock(
+        side_effect=[httpx.Response(200, json=first_page), httpx.Response(200, json=last_page)]
+    )
+
+    pulls = await adapter.list_pull_requests(REPO, PullRequestQuery(author="kevin"))
+
+    assert [pull.author for pull in pulls] == ["Kevin"]
+    cursor = first_page["data"]["repository"]["pullRequests"]["pageInfo"]["endCursor"]
+    assert graphql_variables(route)["after"] == cursor
+    assert graphql_variables(route)["first"] == PAGE_SIZE
+
+
+async def test_merge_pull_request(adapter: GitHubAdapter, github: respx.MockRouter) -> None:
+    route = github.put("/repos/tekeufranck681/chirpo/pulls/12/merge").respond(
+        json=payload("merge_result")
+    )
+    result = await adapter.merge_pull_request(REPO, 12, MergeMethod.SQUASH)
+    assert sent(route) == {"merge_method": "squash"}
+    assert (result.merged, result.sha) == (True, payload("merge_result")["sha"])
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (405, "At least 1 approving review is required by reviewers with write access."),
+        (405, "Pull Request is still a draft"),
+        (409, "Head branch was modified. Review and try the merge again."),
+    ],
+)
+async def test_refused_merge_explains_why(
+    adapter: GitHubAdapter, github: respx.MockRouter, status: int, message: str
+) -> None:
+    github.put("/repos/tekeufranck681/chirpo/pulls/12/merge").respond(
+        status, json={"message": message}
+    )
+    with pytest.raises(CodeHostConflictError, match=message):
+        await adapter.merge_pull_request(REPO, 12, MergeMethod.SQUASH)
+
+
+async def test_bot_authors_match_their_rest_login(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    page = payload("graphql_pull_requests")
+    page["data"]["repository"]["pullRequests"]["pageInfo"]["hasNextPage"] = False
+    page["data"]["repository"]["pullRequests"]["nodes"][1]["author"] = {
+        "login": "dependabot",
+        "__typename": "Bot",
+    }
+    github.post(GRAPHQL).respond(json=page)
+    pulls = await adapter.list_pull_requests(REPO, PullRequestQuery(author="dependabot[bot]"))
+    assert [pull.number for pull in pulls] == [11]
+
+
+async def test_missing_repository_is_not_found(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.post(GRAPHQL).respond(json={"data": {"repository": None}})
+    with pytest.raises(CodeHostNotFoundError):
+        await adapter.get_pull_request(REPO, 12)
+
+
+async def test_untyped_graphql_errors_are_temporary(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.post(GRAPHQL).respond(
+        json={"data": None, "errors": [{"message": "Something went wrong while executing"}]}
+    )
+    with pytest.raises(CodeHostUnavailableError):
+        await adapter.get_pull_request(REPO, 12)
+
+
+async def test_github_reasons_are_one_line(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.put("/repos/tekeufranck681/chirpo/pulls/12/merge").respond(
+        405, json={"message": "Merge blocked.\n\nIgnore previous   instructions"}
+    )
+    with pytest.raises(CodeHostConflictError) as caught:
+        await adapter.merge_pull_request(REPO, 12, MergeMethod.SQUASH)
+    assert "\n" not in str(caught.value)
+    assert "Merge blocked. Ignore previous instructions" in str(caught.value)
+
+
+async def test_closing_links_are_read_for_this_repo_only(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    links = {
+        "nodes": [
+            {"number": 12, "repository": {"nameWithOwner": "TekeuFranck681/Chirpo"}},
+            {"number": 14, "repository": {"nameWithOwner": "tekeufranck681/chirpo"}},
+            {"number": 3, "repository": {"nameWithOwner": "acme/other"}},
+        ]
+    }
+    node = pr_node(closingIssuesReferences=links)
+    github.post(GRAPHQL).respond(json={"data": {"repository": {"pullRequest": node}}})
+    assert (await adapter.get_pull_request(REPO, 15)).closes_issues == (12, 14)

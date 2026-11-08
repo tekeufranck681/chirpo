@@ -6,8 +6,13 @@ import contextlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from chirpo.config import get_settings
+
+if TYPE_CHECKING:
+    from chirpo.adapters.codehost.github.auth import GitHubAuth
+    from chirpo.core.domain import RepoRef
 
 SOURCE_DIR = Path(__file__).resolve().parent
 ALEMBIC_INI = SOURCE_DIR.parents[1] / "alembic.ini"
@@ -115,33 +120,90 @@ async def _telegram(action: str) -> None:
 
 
 def run_github(args: argparse.Namespace) -> None:
-    asyncio.run(_github_whoami(args.repo))
+    asyncio.run(_github(args))
 
 
-async def _github_whoami(repo_text: str | None) -> None:
+async def _github(args: argparse.Namespace) -> None:
     from chirpo.adapters.codehost.github.auth import GitHubAuth, GitHubSetupError
     from chirpo.core.domain import RepoRef
     from chirpo.core.errors import CodeHostError
 
     try:
-        repo = RepoRef.parse("github", repo_text) if repo_text else None
+        repo = RepoRef.parse("github", args.repo) if args.repo else None
         auth = GitHubAuth.from_settings(get_settings())
         if auth is None:
             raise SystemExit(
                 "Set CHIRPO_GITHUB_APP_ID and CHIRPO_GITHUB_APP_PRIVATE_KEY_PATH in your .env "
                 "(or CHIRPO_GITHUB_DEV_TOKEN in development)."
             )
-        identity = await auth.whoami()
-        label = "GitHub App" if identity.kind == "app" else "development token of"
-        print(f"Logged in as {label} {identity.name}")
-        if repo is not None:
-            access = await auth.check_repo(repo)
-            visibility = "private" if access.private else "public"
-            print(f"Can reach {access.full_name} ({visibility} repo)")
-            for name, level in sorted(access.permissions.items()):
-                print(f"  {name}: {level}")
+        await _github_whoami(auth, repo)
+        if args.github_command == "demo" and repo is not None:
+            await _github_demo(auth, repo, write=args.write)
     except (ValueError, GitHubSetupError, CodeHostError) as exc:
         raise SystemExit(str(exc)) from exc
+
+
+async def _github_whoami(auth: "GitHubAuth", repo: "RepoRef | None") -> None:
+    identity = await auth.whoami()
+    label = "GitHub App" if identity.kind == "app" else "development token of"
+    print(f"Logged in as {label} {identity.name}")
+    if repo is not None:
+        access = await auth.check_repo(repo)
+        visibility = "private" if access.private else "public"
+        print(f"Can reach {access.full_name} ({visibility} repo)")
+        for name, level in sorted(access.permissions.items()):
+            print(f"  {name}: {level}")
+
+
+async def _github_demo(auth: "GitHubAuth", repo: "RepoRef", *, write: bool) -> None:
+    """The M2 acceptance check: everything chirpo does on GitHub, run once against a real repo."""
+    from chirpo.adapters.codehost.github.adapter import GitHubAdapter
+    from chirpo.core.domain import (
+        CloseReason,
+        IssuePatch,
+        IssueQuery,
+        IssueState,
+        NewIssue,
+        PullRequestQuery,
+    )
+
+    github = GitHubAdapter(auth)
+    issues = await github.list_issues(repo, IssueQuery(limit=5))
+    print(f"\nOpen issues: {len(issues)}{' (first 5)' if len(issues) == 5 else ''}")
+    for issue in issues:
+        assigned = ", ".join(issue.assignees) or "nobody"
+        print(f"  #{issue.number} {issue.title} (assigned: {assigned})")
+
+    pulls = await github.list_pull_requests(repo, PullRequestQuery(limit=5))
+    print(f"\nOpen pull requests: {len(pulls)}{' (first 5)' if len(pulls) == 5 else ''}")
+    for pull in pulls:
+        merge = {True: "mergeable", False: "has conflicts", None: "mergeability unknown"}
+        draft = "draft, " if pull.draft else ""
+        closes = "".join(f", closes #{number}" for number in pull.closes_issues)
+        print(
+            f"  !{pull.number} {pull.title} ({draft}CI {pull.checks}, "
+            f"{pull.approvals} approval(s), {merge[pull.mergeable]}{closes})"
+        )
+
+    if not write:
+        print("\nRead-only run. Add --write to also create, comment on and close a test issue.")
+        return
+    created = await github.create_issue(
+        repo,
+        NewIssue(
+            title="chirpo demo issue",
+            body="Created by `chirpo github demo --write`. Safe to delete.",
+        ),
+    )
+    print(f"\nCreated #{created.number}: {created.url}")
+    await github.add_comment(repo, created.number, "A comment from chirpo's demo.")
+    print("Commented on it")
+    closed = await github.update_issue(
+        repo,
+        created.number,
+        IssuePatch(state=IssueState.CLOSED, close_reason=CloseReason.NOT_PLANNED),
+    )
+    print(f"Closed it ({closed.close_reason})")
 
 
 def run_migrate(_args: argparse.Namespace) -> None:
@@ -172,10 +234,15 @@ def build_parser() -> argparse.ArgumentParser:
         "telegram_command", choices=["set-webhook", "delete-webhook", "webhook-info"]
     )
     telegram.set_defaults(handler=run_telegram)
-    github = commands.add_parser("github", help="check the GitHub login")
+    github = commands.add_parser("github", help="check the GitHub connection")
     github_commands = github.add_subparsers(dest="github_command", required=True)
     whoami = github_commands.add_parser("whoami", help="show who chirpo is on GitHub")
     whoami.add_argument("repo", nargs="?", help="owner/repo to check access to")
+    demo = github_commands.add_parser(
+        "demo", help="show a repo's issues and PRs as chirpo sees them"
+    )
+    demo.add_argument("repo", help="owner/repo")
+    demo.add_argument("--write", action="store_true", help="also create and close a test issue")
     github.set_defaults(handler=run_github)
     commands.add_parser("migrate", help="apply database migrations").set_defaults(
         handler=run_migrate

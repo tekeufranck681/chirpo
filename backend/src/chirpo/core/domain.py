@@ -266,6 +266,9 @@ class PullRequest(BaseModel):
     checks: CheckStatus = CheckStatus.NONE
     approvals: int = 0
     changes_requested: bool = False
+    # Issues in this repo the PR closes when merged into the default branch ("Closes #12" links,
+    # shown in the Development box on GitHub).
+    closes_issues: tuple[int, ...] = ()
 
 
 class PullRequestQuery(BaseModel):
