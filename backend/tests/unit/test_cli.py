@@ -28,3 +28,16 @@ def test_a_command_is_required() -> None:
 
 def test_migrate_finds_alembic_ini() -> None:
     assert ALEMBIC_INI.is_file()
+
+
+@pytest.mark.parametrize("action", ["set-webhook", "delete-webhook", "webhook-info"])
+def test_telegram_webhook_commands(action: str) -> None:
+    from chirpo.cli import run_telegram
+
+    args = build_parser().parse_args(["telegram", action])
+    assert (args.handler, args.telegram_command) == (run_telegram, action)
+
+
+def test_unknown_telegram_command_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["telegram", "nope"])

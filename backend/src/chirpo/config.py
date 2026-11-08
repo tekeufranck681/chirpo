@@ -1,5 +1,6 @@
 """Settings from CHIRPO_* environment variables or `.env`. The only place that reads env vars."""
 
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
@@ -14,6 +15,7 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 LogFormat = Literal["auto", "json", "console"]
 IntakeMode = Literal["polling", "webhook"]
 LLMProviderName = Literal["gemini"]
+TELEGRAM_SECRET = re.compile(r"[A-Za-z0-9_-]{1,256}")
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6380/0"
     encryption_key: SecretStr = Field(description="Comma-separated Fernet keys, newest first")
     public_url: AnyHttpUrl | None = None
+    # Proxies whose X-Forwarded-* headers the API trusts (comma-separated IPs or "*").
+    trusted_proxies: str = "127.0.0.1"
     sentry_dsn: SecretStr | None = None
 
     telegram_bot_token: SecretStr | None = None
@@ -54,6 +58,14 @@ class Settings(BaseSettings):
     def _async_postgres_driver(cls, value: str) -> str:
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("must start with postgresql+asyncpg:// (the async driver)")
+        return value
+
+    @field_validator("telegram_webhook_secret")
+    @classmethod
+    def _telegram_secret_format(cls, value: SecretStr | None) -> SecretStr | None:
+        # Telegram's rule for secret_token: 1-256 characters from A-Z, a-z, 0-9, _ and -.
+        if value is not None and not TELEGRAM_SECRET.fullmatch(value.get_secret_value()):
+            raise ValueError("must be 1-256 characters: letters, digits, _ or -")
         return value
 
     @field_validator("encryption_key")

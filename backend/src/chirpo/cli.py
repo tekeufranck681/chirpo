@@ -3,9 +3,9 @@
 import argparse
 import asyncio
 import contextlib
+import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from chirpo.config import get_settings
 
@@ -28,6 +28,7 @@ def run_api(args: argparse.Namespace) -> None:
         reload_dirs=[str(SOURCE_DIR)] if args.reload else None,
         log_config=None,  # keep our structlog setup instead of uvicorn's own
         proxy_headers=True,
+        forwarded_allow_ips=get_settings().trusted_proxies,
     )
 
 
@@ -58,6 +59,7 @@ async def _poll() -> None:
     from chirpo.db.repositories import SqlPollCursors
     from chirpo.db.session import create_engine, create_session_factory
     from chirpo.logging import configure_logging, get_logger, init_sentry
+    from chirpo.workers.queue import update_enqueuer
 
     settings = get_settings()
     configure_logging(settings)
@@ -73,16 +75,42 @@ async def _poll() -> None:
     adapter = await TelegramAdapter.connect(settings.telegram_bot_token.get_secret_value())
     engine = create_engine(settings)
     queue = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-
-    async def enqueue(raw: dict[str, Any], update_id: int) -> None:
-        job_id = f"{adapter.event_source}:{update_id}"
-        await queue.enqueue_job("handle_update", adapter.platform, raw, _job_id=job_id)
+    cursors = SqlPollCursors(create_session_factory(engine))
 
     try:
-        await run_poller(adapter, SqlPollCursors(create_session_factory(engine)), enqueue)
+        await run_poller(adapter, cursors, update_enqueuer(queue, adapter))
     finally:
         await queue.aclose()
         await engine.dispose()
+        await adapter.aclose()
+
+
+def run_telegram(args: argparse.Namespace) -> None:
+    asyncio.run(_telegram(args.telegram_command))
+
+
+async def _telegram(action: str) -> None:
+    from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
+
+    settings = get_settings()
+    if settings.telegram_bot_token is None:
+        raise SystemExit("Set CHIRPO_TELEGRAM_BOT_TOKEN in your .env first.")
+    adapter = await TelegramAdapter.connect(settings.telegram_bot_token.get_secret_value())
+    try:
+        if action == "set-webhook":
+            if settings.public_url is None or settings.telegram_webhook_secret is None:
+                raise SystemExit(
+                    "Set CHIRPO_PUBLIC_URL and CHIRPO_TELEGRAM_WEBHOOK_SECRET in your .env first."
+                )
+            url = f"{str(settings.public_url).rstrip('/')}/webhooks/telegram"
+            await adapter.set_webhook(url, settings.telegram_webhook_secret.get_secret_value())
+            print(f"Telegram will now send updates to {url}")
+        elif action == "delete-webhook":
+            await adapter.delete_webhook()
+            print("Webhook removed: polling mode can be used again.")
+        else:
+            print(json.dumps(await adapter.webhook_info(), indent=2, default=str))
+    finally:
         await adapter.aclose()
 
 
@@ -109,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("poll", help="receive Telegram updates by long polling").set_defaults(
         handler=run_poll
     )
+    telegram = commands.add_parser("telegram", help="manage the Telegram webhook")
+    telegram.add_argument(
+        "telegram_command", choices=["set-webhook", "delete-webhook", "webhook-info"]
+    )
+    telegram.set_defaults(handler=run_telegram)
     commands.add_parser("migrate", help="apply database migrations").set_defaults(
         handler=run_migrate
     )

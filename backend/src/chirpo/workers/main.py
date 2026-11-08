@@ -1,10 +1,9 @@
-import asyncio
 from typing import Any, ClassVar
 
 from arq import cron
 
-from chirpo.config import Settings, get_settings
-from chirpo.core.errors import MessagingError
+from chirpo.adapters.messaging.connect import connect_messaging
+from chirpo.config import get_settings
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
 from chirpo.db.repositories import SqlProcessedEvents
@@ -13,7 +12,6 @@ from chirpo.logging import bound_context, configure_logging, get_logger, init_se
 
 log = get_logger(__name__)
 
-CONNECT_ATTEMPTS = 5
 PROCESSED_EVENTS_RETENTION_DAYS = 7
 
 
@@ -41,26 +39,6 @@ async def prune_processed_events(ctx: dict[str, Any]) -> int:
     deleted: int = await ctx["processed"].prune(older_than_days=PROCESSED_EVENTS_RETENTION_DAYS)
     log.info("processed_events_pruned", deleted=deleted)
     return deleted
-
-
-async def connect_messaging(settings: Settings) -> dict[str, MessagingAdapter]:
-    if settings.telegram_bot_token is None:
-        log.warning("telegram_not_configured", hint="set CHIRPO_TELEGRAM_BOT_TOKEN in .env")
-        return {}
-    from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
-
-    token = settings.telegram_bot_token.get_secret_value()
-    for attempt in range(1, CONNECT_ATTEMPTS + 1):
-        try:
-            telegram = await TelegramAdapter.connect(token)
-        except MessagingError as error:
-            if attempt == CONNECT_ATTEMPTS:
-                raise
-            log.warning("telegram_connect_failed", error=str(error), attempt=attempt)
-            await asyncio.sleep(2**attempt)
-        else:
-            return {telegram.platform: telegram}
-    raise AssertionError("unreachable")
 
 
 async def startup(ctx: dict[str, Any]) -> None:

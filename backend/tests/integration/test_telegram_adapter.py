@@ -297,3 +297,30 @@ async def test_fetch_updates_long_polls_from_the_offset(
 
 def test_event_source_names_the_bot(adapter: TelegramAdapter) -> None:
     assert adapter.event_source == "telegram:7000000001"
+
+
+async def test_set_webhook_sends_url_secret_and_update_types(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    from urllib.parse import parse_qs
+
+    route = api.post("/setWebhook").respond(json={"ok": True, "result": True})
+    url = "https://example.trycloudflare.com/webhooks/telegram"
+    await adapter.set_webhook(url, "s3cret")
+
+    sent = parse_qs(route.calls[0].request.content.decode())
+    assert sent["url"] == [url]
+    assert sent["secret_token"] == ["s3cret"]
+    assert json.loads(sent["allowed_updates"][0]) == ["message", "callback_query"]
+
+
+async def test_delete_webhook_and_info(adapter: TelegramAdapter, api: respx.MockRouter) -> None:
+    api.post("/deleteWebhook").respond(json={"ok": True, "result": True})
+    api.post("/getWebhookInfo").respond(
+        json={
+            "ok": True,
+            "result": {"url": "", "has_custom_certificate": False, "pending_update_count": 3},
+        }
+    )
+    await adapter.delete_webhook()
+    assert (await adapter.webhook_info())["pending_update_count"] == 3

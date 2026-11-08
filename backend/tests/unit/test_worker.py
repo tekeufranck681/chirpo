@@ -52,11 +52,11 @@ async def test_unknown_platform_fails_the_job_visibly(ctx: dict[str, Any]) -> No
 async def test_connect_retries_while_telegram_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from chirpo.adapters.messaging.connect import connect_messaging
     from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
     from chirpo.config import Settings
     from chirpo.core.errors import MessagingUnavailableError
     from chirpo.security import generate_key
-    from chirpo.workers.main import connect_messaging
 
     calls: list[str] = []
     connected = ParsingMessaging()
@@ -72,7 +72,7 @@ async def test_connect_retries_while_telegram_is_unreachable(
         return None
 
     monkeypatch.setattr(TelegramAdapter, "connect", flaky_connect)
-    monkeypatch.setattr("chirpo.workers.main.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("chirpo.adapters.messaging.connect.asyncio.sleep", no_sleep)
     settings = Settings(_env_file=None, encryption_key=generate_key(), telegram_bot_token="1:T")
 
     assert await connect_messaging(settings) == {"telegram": connected}
@@ -80,8 +80,8 @@ async def test_connect_retries_while_telegram_is_unreachable(
 
 
 async def test_worker_runs_without_telegram_configured() -> None:
+    from chirpo.adapters.messaging.connect import connect_messaging
     from chirpo.config import Settings
     from chirpo.security import generate_key
-    from chirpo.workers.main import connect_messaging
 
     assert await connect_messaging(Settings(_env_file=None, encryption_key=generate_key())) == {}

@@ -75,6 +75,24 @@ class TelegramAdapter:
         )
         return [update.to_dict() for update in updates]
 
+    async def set_webhook(self, url: str, secret: str) -> None:
+        await _translate_errors(
+            lambda: self._bot.set_webhook(
+                url=url, secret_token=secret, allowed_updates=list(ALLOWED_UPDATES)
+            )
+        )
+
+    async def delete_webhook(self) -> None:
+        await _translate_errors(self._bot.delete_webhook)
+
+    async def webhook_info(self) -> dict[str, Any]:
+        info = await _translate_errors(self._bot.get_webhook_info)
+        return {
+            "url": info.url,
+            "pending_update_count": info.pending_update_count,
+            "last_error_message": info.last_error_message,
+        }
+
     async def aclose(self) -> None:
         await self._bot.shutdown()
 
