@@ -1,0 +1,73 @@
+[project]
+name = "chirpo"
+version = "0.1.0"
+description = "Manage your GitHub from your team chat, in plain language. Open source and self-hostable."
+license = "MIT"
+authors = [{ name = "tekeu-franck" }]
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/tekeufranck681/chirpo"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4",
+    "pre-commit>=4.7",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.17",
+]
+
+[tool.uv]
+# Supply-chain cooldown: only install package versions published at least 14 days ago.
+# Most malicious releases are detected and pulled from PyPI within days.
+exclude-newer = "14 days"
+
+# ---------------------------------------------------------------- ruff (lint + format)
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: unused imports, undefined names
+    "I",        # import sorting
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade: modern syntax for 3.12
+    "SIM",      # simplifications
+    "ASYNC",    # blocking calls inside async code
+    "S",        # bandit: security issues
+    "RUF",      # ruff-specific checks
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is how pytest works
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["chirpo"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+# core/ is the heart of the project: strict typing, no exceptions (CLAUDE.md).
+[[tool.mypy.overrides]]
+module = ["chirpo.core", "chirpo.core.*"]
+strict = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["--strict-markers", "--strict-config", "-ra"]
