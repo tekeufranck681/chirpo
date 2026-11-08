@@ -46,6 +46,7 @@ jobs:
             security
             docker
             deps
+            deps-dev
             ci
             docs
             setup
