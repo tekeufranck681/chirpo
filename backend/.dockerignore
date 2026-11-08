@@ -1,0 +1,12 @@
+# Keep the backend Docker build context small and free of secrets.
+.env
+.env.*
+*.pem
+*.key
+.venv
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+tests
