@@ -1,0 +1,21 @@
+{
+  "update_id": 900006,
+  "message": {
+    "message_id": 6,
+    "from": {
+      "id": 111111,
+      "is_bot": false,
+      "first_name": "Franck",
+      "last_name": "Tekeu",
+      "username": "tekeufranck",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "date": 1762600000,
+    "text": "lunch at 1?"
+  }
+}

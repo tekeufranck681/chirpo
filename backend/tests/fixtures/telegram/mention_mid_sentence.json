@@ -1,0 +1,27 @@
+{
+  "update_id": 900022,
+  "message": {
+    "message_id": 23,
+    "from": {
+      "id": 111111,
+      "is_bot": false,
+      "first_name": "Franck",
+      "last_name": "Tekeu",
+      "username": "tekeufranck"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "date": 1762600000,
+    "text": "hey @chirpo_test_bot  can you\nlist my issues",
+    "entities": [
+      {
+        "offset": 4,
+        "length": 16,
+        "type": "mention"
+      }
+    ]
+  }
+}

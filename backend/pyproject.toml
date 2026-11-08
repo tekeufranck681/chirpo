@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
+    "python-telegram-bot>=22",
     "redis>=5.2",
     "sentry-sdk>=2.30",
     "sqlalchemy[asyncio]>=2.0.40",
@@ -37,6 +38,7 @@ dev = [
     "pre-commit>=4.7",
     "pytest>=9.1",
     "pytest-asyncio>=1.4",
+    "respx>=0.22",
     "ruff>=0.17",
 ]
 
@@ -91,5 +93,9 @@ asyncio_mode = "auto"
 # One loop for the run so the session-scoped engine fixture can be shared.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-markers = ["integration: needs a running Postgres (docker compose up -d postgres)"]
+markers = ["integration: needs a running Postgres (docker compose up -d)"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
+filterwarnings = [
+    # PTB 22 announces retry_after becoming a timedelta in v23; the adapter handles both.
+    "ignore:.*retry_after.*:telegram.warnings.PTBDeprecationWarning",
+]

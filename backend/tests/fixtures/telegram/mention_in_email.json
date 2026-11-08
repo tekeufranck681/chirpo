@@ -1,0 +1,20 @@
+{
+  "update_id": 900021,
+  "message": {
+    "message_id": 22,
+    "from": {
+      "id": 111111,
+      "is_bot": false,
+      "first_name": "Franck",
+      "last_name": "Tekeu",
+      "username": "tekeufranck"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "date": 1762600000,
+    "text": "write to support@chirpo_test_bot.example please"
+  }
+}
