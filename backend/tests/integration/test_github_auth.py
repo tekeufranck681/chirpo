@@ -28,19 +28,14 @@ from chirpo.core.errors import (
     CodeHostValidationError,
 )
 from chirpo.security import generate_key
+from tests.integration.github_api import API, mocked_github, payload
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "github"
-API = "https://api.github.com"
 APP_ID = 1234567
 INSTALLATION_ID = 87654321
 REPO = RepoRef(provider="github", owner="tekeufranck681", name="chirpo")
 INSTALLATION_URL = f"{API}/repos/tekeufranck681/chirpo/installation"
 TOKEN_URL = f"{API}/app/installations/{INSTALLATION_ID}/access_tokens"
 REPO_URL = f"{API}/repos/tekeufranck681/chirpo"
-
-
-def fixture(name: str) -> Any:
-    return json.loads((FIXTURES / f"{name}.json").read_text())
 
 
 @pytest.fixture(scope="module")
@@ -64,7 +59,7 @@ def app_auth(private_pem: str) -> GitHubAuth:
 
 @pytest.fixture
 def github() -> Iterator[respx.MockRouter]:
-    with respx.mock(base_url=API, assert_all_called=False) as router:
+    with mocked_github() as router:
         yield router
 
 
@@ -86,9 +81,9 @@ def token_auth() -> GitHubAuth:
 async def test_app_uses_a_signed_jwt_then_a_repo_scoped_installation_token(
     app_auth: GitHubAuth, github: respx.MockRouter, private_key: rsa.RSAPrivateKey
 ) -> None:
-    lookup = github.get(INSTALLATION_URL).respond(json=fixture("installation"))
-    mint = github.post(TOKEN_URL).respond(201, json=fixture("access_token"))
-    repo = github.get(REPO_URL).respond(json=fixture("repo"))
+    lookup = github.get(INSTALLATION_URL).respond(json=payload("installation"))
+    mint = github.post(TOKEN_URL).respond(201, json=payload("access_token"))
+    repo = github.get(REPO_URL).respond(json=payload("repo"))
 
     access = await app_auth.check_repo(REPO)
 
@@ -98,15 +93,15 @@ async def test_app_uses_a_signed_jwt_then_a_repo_scoped_installation_token(
     claims = jwt.decode(app_jwt, private_key.public_key(), algorithms=["RS256"])
     assert (scheme, claims["iss"]) == ("Bearer", str(APP_ID))
     assert json.loads(mint.calls.last.request.content)["repositories"] == ["chirpo"]
-    assert authorization(repo) == f"token {fixture('access_token')['token']}"
+    assert authorization(repo) == f"token {payload('access_token')['token']}"
 
 
 async def test_installation_and_token_are_reused(
     app_auth: GitHubAuth, github: respx.MockRouter
 ) -> None:
-    lookup = github.get(INSTALLATION_URL).respond(json=fixture("installation"))
-    mint = github.post(TOKEN_URL).respond(201, json=fixture("access_token"))
-    github.get(REPO_URL).respond(json=fixture("repo"))
+    lookup = github.get(INSTALLATION_URL).respond(json=payload("installation"))
+    mint = github.post(TOKEN_URL).respond(201, json=payload("access_token"))
+    github.get(REPO_URL).respond(json=payload("repo"))
 
     for text in ("tekeufranck681/chirpo", "TekeuFranck681/Chirpo"):
         client = await app_auth.for_repo(RepoRef.parse("github", text))
@@ -117,14 +112,14 @@ async def test_installation_and_token_are_reused(
 
 async def test_app_not_installed_on_repo(app_auth: GitHubAuth, github: respx.MockRouter) -> None:
     github.get(INSTALLATION_URL).respond(404, json={"message": "Not Found"})
-    with pytest.raises(CodeHostNotFoundError, match="not installed on tekeufranck681/chirpo"):
+    with pytest.raises(CodeHostForbiddenError, match="not installed on tekeufranck681/chirpo"):
         await app_auth.for_repo(REPO)
 
 
 async def test_token_minting_failure_is_translated(
     app_auth: GitHubAuth, github: respx.MockRouter
 ) -> None:
-    github.get(INSTALLATION_URL).respond(json=fixture("installation"))
+    github.get(INSTALLATION_URL).respond(json=payload("installation"))
     github.post(TOKEN_URL).respond(403, json={"message": "This installation has been suspended"})
     client = await app_auth.for_repo(REPO)
     with pytest.raises(CodeHostForbiddenError), translate_errors("get repo"):
@@ -132,7 +127,7 @@ async def test_token_minting_failure_is_translated(
 
 
 async def test_whoami_as_app(app_auth: GitHubAuth, github: respx.MockRouter) -> None:
-    route = github.get("/app").respond(json=fixture("app"))
+    route = github.get("/app").respond(json=payload("app"))
     identity = await app_auth.whoami()
     assert (identity.kind, identity.name) == ("app", "chirpo-dev-tekeu")
     assert authorization(route).startswith("Bearer ")
@@ -143,8 +138,8 @@ async def test_whoami_as_app(app_auth: GitHubAuth, github: respx.MockRouter) -> 
 
 async def test_dev_token_is_used_for_every_repo(github: respx.MockRouter) -> None:
     auth = token_auth()
-    github.get("/user").respond(json=fixture("user"))
-    repo = github.get(REPO_URL).respond(json=fixture("repo"))
+    github.get("/user").respond(json=payload("user"))
+    repo = github.get(REPO_URL).respond(json=payload("repo"))
 
     identity = await auth.whoami()
     access = await auth.check_repo(REPO)

@@ -63,6 +63,18 @@ def test_empty_patch_is_detected() -> None:
     assert not IssuePatch(state=IssueState.CLOSED).is_empty
 
 
+def test_label_filters_cannot_contain_commas() -> None:
+    with pytest.raises(ValidationError, match="commas"):
+        IssueQuery(labels=("bug, ui",))
+
+
+async def test_fake_drops_assignees_it_cannot_assign() -> None:
+    issue = await FakeCodeHost().create_issue(
+        REPO, NewIssue(title="x", assignees=("franck", "ghost"))
+    )
+    assert issue.assignees == ("franck",)
+
+
 @pytest.mark.parametrize("limit", [0, 101])
 def test_query_limit_is_bounded(limit: int) -> None:
     with pytest.raises(ValidationError):

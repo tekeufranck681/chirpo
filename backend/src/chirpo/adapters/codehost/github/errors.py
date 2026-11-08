@@ -51,8 +51,14 @@ def retry_policy(exc: GitHubException, retry_count: int) -> RetryOption:
 
 
 def _core_error(exc: GitHubException, what: str) -> CodeHostError:
-    if isinstance(exc, RequestError) and isinstance(exc.exc, GitHubException):
-        # Failures inside the auth flow (e.g. minting a token) arrive wrapped.
+    if isinstance(exc, RequestError) and isinstance(exc.exc, RequestFailed):
+        # Minting the installation token failed (wrapped by the auth flow): the App was uninstalled,
+        # suspended, or lost access to the repo. That's an access problem, whatever the status.
+        if isinstance(exc.exc, RateLimitExceeded):
+            return _core_error(exc.exc, what)
+        status = exc.exc.response.status_code
+        if status < 500:
+            return CodeHostForbiddenError(f"{what}: chirpo's GitHub App lost access ({status})")
         return _core_error(exc.exc, what)
     if isinstance(exc, RateLimitExceeded):
         return CodeHostRateLimitedError(exc.retry_after.total_seconds())

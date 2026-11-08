@@ -1,0 +1,11 @@
+{
+  "id": 13002017999,
+  "node_id": "LA_kwDOVnAV6M8test",
+  "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/status:%20todo",
+  "name": "status: todo",
+  "color": "ededed",
+  "default": false,
+  "description": "Not started",
+  "archived_at": null,
+  "archived_by": null
+}

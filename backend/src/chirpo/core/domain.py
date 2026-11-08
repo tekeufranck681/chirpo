@@ -203,6 +203,14 @@ class IssueQuery(BaseModel):
     labels: tuple[str, ...] = ()
     limit: int = Field(default=30, ge=1, le=100)
 
+    @field_validator("labels")
+    @classmethod
+    def _filterable_labels(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        # Code hosts take the filter as one comma-separated string.
+        if any("," in value for value in values):
+            raise ValueError("label filters can't contain commas")
+        return values
+
 
 class LabelSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
