@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from chirpo.cli import ALEMBIC_INI, build_parser, run_api, run_migrate, run_poll, run_worker
@@ -41,3 +43,31 @@ def test_telegram_webhook_commands(action: str) -> None:
 def test_unknown_telegram_command_is_rejected() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["telegram", "nope"])
+
+
+@pytest.mark.parametrize(("argv", "repo"), [([], None), (["octo/app"], "octo/app")])
+def test_github_whoami_command(argv: list[str], repo: str | None) -> None:
+    from chirpo.cli import run_github
+
+    args = build_parser().parse_args(["github", "whoami", *argv])
+    assert (args.handler, args.repo) == (run_github, repo)
+
+
+@pytest.mark.parametrize(
+    ("repo", "message"), [(None, "CHIRPO_GITHUB_APP_ID"), ("not-a-repo", "owner/repo")]
+)
+def test_github_whoami_explains_setup_problems(
+    monkeypatch: pytest.MonkeyPatch, repo: str | None, message: str
+) -> None:
+    import chirpo.cli
+    from chirpo.config import Settings
+    from chirpo.security import generate_key
+
+    for name in [name for name in os.environ if name.startswith("CHIRPO_")]:
+        monkeypatch.delenv(name)
+    unconfigured = Settings(_env_file=None, encryption_key=generate_key())  # type: ignore[call-arg]
+    monkeypatch.setattr(chirpo.cli, "get_settings", lambda: unconfigured)
+    with pytest.raises(SystemExit, match=message):
+        chirpo.cli.run_github(
+            build_parser().parse_args(["github", "whoami", *([repo] if repo else [])])
+        )

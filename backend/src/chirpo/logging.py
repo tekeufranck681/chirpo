@@ -36,6 +36,7 @@ SECRET_PATTERNS = (
     re.compile(r"bot\d+:[\w-]+"),  # Telegram bot token, e.g. in api.telegram.org/bot<token>/...
     re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"),  # user:password@ in URLs
     re.compile(r"(?i)bearer\s+[\w.~+/-]+=*"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|$)", re.S),
 )
 
 

@@ -7,16 +7,19 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.20 /uv /bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
+    UV_CONCURRENT_DOWNLOADS=4 \
+    UV_HTTP_TIMEOUT=120 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-install-project
+# Downloads are kept in a build cache, so a failed or repeated build doesn't fetch everything again.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install-project
 
 COPY . .
-RUN uv sync --locked
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked
 
 EXPOSE 8000
 CMD ["chirpo", "api", "--host", "0.0.0.0"]

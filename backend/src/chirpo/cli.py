@@ -1,4 +1,4 @@
-"""The `chirpo` command: `chirpo api`, `chirpo worker`, `chirpo poll`, `chirpo migrate`."""
+"""The `chirpo` command: api, worker, poll, telegram, github, migrate."""
 
 import argparse
 import asyncio
@@ -114,6 +114,36 @@ async def _telegram(action: str) -> None:
         await adapter.aclose()
 
 
+def run_github(args: argparse.Namespace) -> None:
+    asyncio.run(_github_whoami(args.repo))
+
+
+async def _github_whoami(repo_text: str | None) -> None:
+    from chirpo.adapters.codehost.github.auth import GitHubAuth, GitHubSetupError
+    from chirpo.core.domain import RepoRef
+    from chirpo.core.errors import CodeHostError
+
+    try:
+        repo = RepoRef.parse("github", repo_text) if repo_text else None
+        auth = GitHubAuth.from_settings(get_settings())
+        if auth is None:
+            raise SystemExit(
+                "Set CHIRPO_GITHUB_APP_ID and CHIRPO_GITHUB_APP_PRIVATE_KEY_PATH in your .env "
+                "(or CHIRPO_GITHUB_DEV_TOKEN in development)."
+            )
+        identity = await auth.whoami()
+        label = "GitHub App" if identity.kind == "app" else "development token of"
+        print(f"Logged in as {label} {identity.name}")
+        if repo is not None:
+            access = await auth.check_repo(repo)
+            visibility = "private" if access.private else "public"
+            print(f"Can reach {access.full_name} ({visibility} repo)")
+            for name, level in sorted(access.permissions.items()):
+                print(f"  {name}: {level}")
+    except (ValueError, GitHubSetupError, CodeHostError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+
 def run_migrate(_args: argparse.Namespace) -> None:
     from alembic import command
     from alembic.config import Config
@@ -142,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         "telegram_command", choices=["set-webhook", "delete-webhook", "webhook-info"]
     )
     telegram.set_defaults(handler=run_telegram)
+    github = commands.add_parser("github", help="check the GitHub login")
+    github_commands = github.add_subparsers(dest="github_command", required=True)
+    whoami = github_commands.add_parser("whoami", help="show who chirpo is on GitHub")
+    whoami.add_argument("repo", nargs="?", help="owner/repo to check access to")
+    github.set_defaults(handler=run_github)
     commands.add_parser("migrate", help="apply database migrations").set_defaults(
         handler=run_migrate
     )

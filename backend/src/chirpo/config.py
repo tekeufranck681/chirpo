@@ -86,6 +86,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "github_events_mode=webhook needs public_url and github_webhook_secret"
             )
+        if self.github_app_id is not None and self.github_app_private_key_path is None:
+            raise ValueError("github_app_id needs github_app_private_key_path (the App's .pem key)")
         if self.env == "production" and self.github_dev_token:
             raise ValueError("github_dev_token is for development only; use the GitHub App")
         return self

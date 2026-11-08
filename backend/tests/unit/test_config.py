@@ -73,6 +73,7 @@ def test_sync_database_driver_is_rejected() -> None:
         ({"telegram_mode": "webhook"}, "telegram_mode=webhook"),
         ({"github_events_mode": "webhook"}, "github_events_mode=webhook"),
         ({"env": "production", "github_dev_token": "ghp_x"}, "development only"),
+        ({"github_app_id": 123}, "github_app_private_key_path"),
     ],
 )
 def test_incomplete_or_unsafe_combinations_are_rejected(

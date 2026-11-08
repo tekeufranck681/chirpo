@@ -1,0 +1,43 @@
+{
+  "id": 1234567,
+  "slug": "chirpo-dev-tekeu",
+  "client_id": "Iv23liEXAMPLE0000000",
+  "node_id": "A_kwHOAEXAMPLE",
+  "owner": {
+    "login": "tekeufranck681",
+    "id": 186301755,
+    "node_id": "U_kgDOCxq9Ow",
+    "avatar_url": "https://avatars.githubusercontent.com/u/186301755?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/tekeufranck681",
+    "html_url": "https://github.com/tekeufranck681",
+    "followers_url": "https://api.github.com/users/tekeufranck681/followers",
+    "following_url": "https://api.github.com/users/tekeufranck681/following{/other_user}",
+    "gists_url": "https://api.github.com/users/tekeufranck681/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/tekeufranck681/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/tekeufranck681/subscriptions",
+    "organizations_url": "https://api.github.com/users/tekeufranck681/orgs",
+    "repos_url": "https://api.github.com/users/tekeufranck681/repos",
+    "events_url": "https://api.github.com/users/tekeufranck681/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/tekeufranck681/received_events",
+    "type": "User",
+    "site_admin": false,
+    "user_view_type": "public"
+  },
+  "name": "chirpo-dev-tekeu",
+  "description": "",
+  "external_url": "https://github.com/tekeufranck681/chirpo",
+  "html_url": "https://github.com/apps/chirpo-dev-tekeu",
+  "created_at": "2026-11-07T10:00:00Z",
+  "updated_at": "2026-11-07T10:00:00Z",
+  "permissions": {
+    "checks": "read",
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "statuses": "read"
+  },
+  "events": [],
+  "installations_count": 1
+}

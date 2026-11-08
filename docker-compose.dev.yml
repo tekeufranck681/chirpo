@@ -13,9 +13,12 @@ x-backend: &backend
     CHIRPO_REDIS_URL: redis://redis:6379/0
     # Only Caddy can reach the API (port not published), so its forwarded headers are trusted.
     CHIRPO_TRUSTED_PROXIES: "*"
+    # The host path in .env doesn't exist inside the container; the key is mounted here instead.
+    CHIRPO_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/chirpo/github-app.pem
   volumes:
     - ./backend/src:/app/src
     - ./backend/alembic:/app/alembic
+    - ./secrets:/run/secrets/chirpo:ro
 
 services:
   migrate:
