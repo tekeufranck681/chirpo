@@ -215,3 +215,16 @@ async def test_mergeable_pull_request_merges() -> None:
     result = await host.merge_pull_request(REPO, pull.number, MergeMethod.SQUASH)
     assert result.merged
     assert (await host.get_pull_request(REPO, pull.number)).state == PullRequestState.MERGED
+
+
+@pytest.mark.parametrize(("base", "closed"), [("main", True), ("develop", False)])
+async def test_fake_merge_closes_linked_issues_on_the_default_branch(
+    base: str, closed: bool
+) -> None:
+    host = FakeCodeHost()
+    issue = await host.create_issue(REPO, NewIssue(title="Checkout crashes"))
+    pull = host.add_pull_request(REPO, base_branch=base, closes_issues=(issue.number,))
+    await host.merge_pull_request(REPO, pull.number, MergeMethod.SQUASH)
+    after = await host.get_issue(REPO, issue.number)
+    assert (after.state == IssueState.CLOSED) is closed
+    assert after.close_reason == (CloseReason.COMPLETED if closed else None)

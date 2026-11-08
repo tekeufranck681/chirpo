@@ -7,6 +7,7 @@ from typing import Any
 from chirpo.core.domain import (
     ChatRef,
     ChatUser,
+    CloseReason,
     InboundCallback,
     InboundEvent,
     InboundMessage,
@@ -108,6 +109,7 @@ class FakeCodeHost:
         self.comments: list[tuple[str, int, str]] = []
         self.labels: dict[str, set[str]] = {}
         self.users: set[str] = {"franck"}
+        self.default_branch = "main"
         self.permissions: dict[tuple[str, str], RepoPermission] = {}
         self._last_number: dict[str, int] = {}
         self._clock = datetime(2026, 1, 1, tzinfo=UTC)
@@ -235,6 +237,13 @@ class FakeCodeHost:
         if pull.state != PullRequestState.OPEN or pull.draft or pull.mergeable is False:
             raise CodeHostConflictError(f"{repo.full_name}!{number} can't be merged")
         self.pulls[(repo.key, number)] = pull.model_copy(update={"state": PullRequestState.MERGED})
+        if pull.base_branch == self.default_branch:  # like GitHub: linked issues close themselves
+            for issue_number in pull.closes_issues:
+                await self.update_issue(
+                    repo,
+                    issue_number,
+                    IssuePatch(state=IssueState.CLOSED, close_reason=CloseReason.COMPLETED),
+                )
         return MergeResult(merged=True, sha="f" * 40, message=f"merged with {method}")
 
     async def aclose(self) -> None:

@@ -71,3 +71,16 @@ def test_github_whoami_explains_setup_problems(
         chirpo.cli.run_github(
             build_parser().parse_args(["github", "whoami", *([repo] if repo else [])])
         )
+
+
+def test_github_demo_command() -> None:
+    from chirpo.cli import run_github
+
+    args = build_parser().parse_args(["github", "demo", "octo/app", "--write"])
+    assert (args.handler, args.repo, args.write) == (run_github, "octo/app", True)
+    assert not build_parser().parse_args(["github", "demo", "octo/app"]).write
+
+
+def test_github_demo_needs_a_repo() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["github", "demo"])

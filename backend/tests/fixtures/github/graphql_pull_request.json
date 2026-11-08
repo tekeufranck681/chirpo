@@ -1,0 +1,37 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 12,
+        "title": "feat(github): issues, labels, users and permissions via the GitHub App",
+        "state": "MERGED",
+        "isDraft": false,
+        "url": "https://github.com/tekeufranck681/chirpo/pull/12",
+        "mergeable": "UNKNOWN",
+        "headRefName": "feat/github-issues",
+        "baseRefName": "main",
+        "author": {
+          "login": "tekeufranck681",
+          "__typename": "User"
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": []
+        },
+        "closingIssuesReferences": {
+          "nodes": []
+        }
+      }
+    }
+  }
+}
