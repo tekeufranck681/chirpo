@@ -29,13 +29,24 @@ mean `docker compose -f docker-compose.dev.yml`):
 
 ```bash
 cp .env.example .env            # then set CHIRPO_ENCRYPTION_KEY (the file explains how)
-docker compose up -d            # from the repo root: Postgres (localhost:5433), Redis
-                                # (localhost:6380), Adminer database GUI (http://localhost:8081)
-cd backend
+docker compose up -d            # builds and starts everything, runs migrations
+curl localhost:8080/api/ready   # {"status":"ok",...} once it's up
+cd backend                      # for local tooling (tests, linters)
 uv sync                         # install dependencies
 uv run pre-commit install       # run checks before each commit (once per clone)
 uv run alembic upgrade head     # create the database tables
 ```
+
+What runs (all on localhost only):
+
+| Address | Service |
+|---|---|
+| http://localhost:8080 | Caddy, the entry point (`/api/*` and `/webhooks/*` go to the API) |
+| http://localhost:8080/api/docs | API documentation |
+| http://localhost:8081 | Adminer, database GUI (server `db`) |
+| localhost:5433 / 6380 | Postgres / Redis, for local tools |
+
+The API and worker reload automatically when you edit `backend/src`. Logs: `docker compose logs -f api worker`.
 
 Everyday commands (from `backend/`):
 

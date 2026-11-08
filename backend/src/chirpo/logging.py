@@ -68,6 +68,11 @@ def redact_secrets(
     return scrub(event_dict)  # type: ignore[no-any-return]
 
 
+def _scrub_rendered(_logger: Any, _method: str, rendered: Any) -> Any:
+    # The console renderer formats tracebacks itself, after redact_secrets ran.
+    return scrub(rendered)
+
+
 def _scrub_sentry_event(event: Any, _hint: Any) -> Any:
     return scrub(event)
 
@@ -83,7 +88,7 @@ def configure_logging(settings: Settings) -> None:
     renderer: list[Processor] = (
         [structlog.processors.format_exc_info, redact_secrets, structlog.processors.JSONRenderer()]
         if settings.json_logs
-        else [structlog.dev.ConsoleRenderer()]
+        else [structlog.dev.ConsoleRenderer(), _scrub_rendered]
     )
 
     structlog.configure(

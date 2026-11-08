@@ -7,14 +7,21 @@ authors = [{ name = "tekeu-franck" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.16",
+    "arq>=0.26",
     "asyncpg>=0.30",
     "cryptography>=45",
+    "fastapi>=0.115",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
+    "redis>=5.2",
     "sentry-sdk>=2.30",
     "sqlalchemy[asyncio]>=2.0.40",
     "structlog>=25.4",
+    "uvicorn[standard]>=0.34",
 ]
+
+[project.scripts]
+chirpo = "chirpo.cli:main"
 
 [project.urls]
 Repository = "https://github.com/tekeufranck681/chirpo"
@@ -25,6 +32,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "mypy>=2.4",
     "pre-commit>=4.7",
     "pytest>=9.1",
