@@ -88,7 +88,15 @@ class ChatConnection(IdMixin, TimestampsMixin, WorkspaceScopedMixin, Base):
 class RepoConnection(IdMixin, TimestampsMixin, WorkspaceScopedMixin, Base):
     __tablename__ = "repo_connections"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "provider", "owner", "name"),
+        # Repo names are case-insensitive on code hosts: "Owner/Repo" and "owner/repo" are one repo.
+        Index(
+            "uq_repo_connections_workspace_id_repo",
+            "workspace_id",
+            "provider",
+            text("lower(owner)"),
+            text("lower(name)"),
+            unique=True,
+        ),
         Index(
             "uq_repo_connections_one_default_per_workspace",
             "workspace_id",
@@ -120,7 +128,11 @@ class Identity(IdMixin, TimestampsMixin, WorkspaceScopedMixin, Base):
     __tablename__ = "identities"
     __table_args__ = (
         UniqueConstraint("workspace_id", "platform", "external_id"),
+        UniqueConstraint("member_id", "platform"),  # one account per platform per member
         CheckConstraint(one_of("kind", IdentityKind), name="kind"),
+        CheckConstraint(
+            f"kind <> '{IdentityKind.CODEHOST}' OR username IS NOT NULL", name="codehost_login"
+        ),
         # The member must belong to the same workspace as the identity.
         ForeignKeyConstraint(
             ["workspace_id", "member_id"],

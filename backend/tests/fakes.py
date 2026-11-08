@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID, uuid4
 
 from chirpo.core.domain import (
     ChatRef,
@@ -28,6 +29,8 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import CodeHostConflictError, CodeHostNotFoundError
+from chirpo.core.permissions import Role
+from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
 CHAT = ChatRef(platform="fake", chat_id="-100")
 USER = ChatUser(platform="fake", user_id="42", display_name="Paul", username="paul")
@@ -248,3 +251,106 @@ class FakeCodeHost:
 
     async def aclose(self) -> None:
         pass
+
+
+class FakeWorkspaces:
+    """In-memory Workspaces with the SQL semantics (case-insensitive repos, one default)."""
+
+    def __init__(self) -> None:
+        self.by_chat: dict[tuple[str, str], Workspace] = {}
+        self.links: dict[UUID, list[LinkedRepo]] = {}
+
+    async def for_chat(self, chat: ChatRef) -> Workspace | None:
+        return self.by_chat.get((chat.platform, chat.chat_id))
+
+    async def get_or_create_for_chat(self, chat: ChatRef, *, name: str) -> Workspace:
+        return self.by_chat.setdefault(
+            (chat.platform, chat.chat_id), Workspace(id=uuid4(), name=name)
+        )
+
+    async def repos(self, workspace_id: UUID) -> list[LinkedRepo]:
+        links = self.links.get(workspace_id, [])
+        return sorted(links, key=lambda link: not link.is_default)
+
+    async def link_repo(
+        self, workspace_id: UUID, repo: RepoRef, *, installation_id: int | None = None
+    ) -> LinkedRepo:
+        links = self.links.setdefault(workspace_id, [])
+        for index, link in enumerate(links):
+            if link.repo.key == repo.key:
+                if installation_id is not None:
+                    links[index] = link.model_copy(update={"installation_id": installation_id})
+                return links[index]
+        link = LinkedRepo(repo=repo, is_default=not links, installation_id=installation_id)
+        links.append(link)
+        return link
+
+    async def unlink_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
+        links = self.links.get(workspace_id, [])
+        for index, link in enumerate(links):
+            if link.repo.key == repo.key:
+                del links[index]
+                if link.is_default and links:
+                    links[0] = links[0].model_copy(update={"is_default": True})
+                return True
+        return False
+
+
+class FakeMembers:
+    def __init__(self) -> None:
+        self.members: dict[UUID, Member] = {}
+        self.chat_accounts: dict[tuple[UUID, str, str], UUID] = {}
+
+    async def for_chat_user(self, workspace_id: UUID, user: ChatUser) -> Member:
+        key = (workspace_id, user.platform, user.user_id)
+        if key in self.chat_accounts:
+            member = self.members[self.chat_accounts[key]].model_copy(
+                update={"display_name": user.display_name, "chat_username": user.username}
+            )
+        else:
+            member = Member(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                display_name=user.display_name,
+                role=Role.MEMBER,
+                chat_username=user.username,
+            )
+            self.chat_accounts[key] = member.id
+        self.members[member.id] = member
+        return member
+
+    async def all(self, workspace_id: UUID) -> list[Member]:
+        return [member for member in self.members.values() if member.workspace_id == workspace_id]
+
+    async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None:
+        return self._update(workspace_id, member_id, role=role)
+
+    async def link_codehost(
+        self, workspace_id: UUID, member_id: UUID, account: CodeHostAccount
+    ) -> Member | None:
+        if self._get(workspace_id, member_id) is None:
+            return None
+        same = (account.provider, account.user_id)
+        for other in await self.all(workspace_id):
+            if other.codehost and (other.codehost.provider, other.codehost.user_id) == same:
+                self._update(workspace_id, other.id, codehost=None)
+        return self._update(workspace_id, member_id, codehost=account)
+
+    def _get(self, workspace_id: UUID, member_id: UUID) -> Member | None:
+        member = self.members.get(member_id)
+        return member if member and member.workspace_id == workspace_id else None
+
+    def _update(self, workspace_id: UUID, member_id: UUID, **changes: Any) -> Member | None:
+        member = self._get(workspace_id, member_id)
+        if member is None:
+            return None
+        self.members[member_id] = member.model_copy(update=changes)
+        return self.members[member_id]
+
+
+class FakeAuditLog:
+    def __init__(self) -> None:
+        self.entries: list[AuditEntry] = []
+
+    async def record(self, entry: AuditEntry) -> None:
+        self.entries.append(entry)
