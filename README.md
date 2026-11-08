@@ -6,7 +6,7 @@ Manage your GitHub from your team chat, in plain language.
 
 In a Telegram group, someone writes:
 
-> @chirpo checkout crashes on Android 13, give it to Paul, it's urgent
+> @chirpo checkout crashes on Android 13, give it to Franck, it's urgent
 
 chirpo proposes a GitHub issue (title, assignee, labels, priority), waits for confirmation, creates it,
 and replies with the link. It also posts pull request and issue activity back into the chat.
@@ -60,6 +60,10 @@ uv run alembic revision --autogenerate -m "describe the change"   # after changi
 
 Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/)
 with a scope: `type(scope): message`, e.g. `feat(llm): add Gemini provider`.
+
+## Author
+
+Created by Tekeu Franck ([@tekeufranck681](https://github.com/tekeufranck681)).
 
 ## License
 
