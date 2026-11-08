@@ -1,0 +1,12 @@
+# Development: plain HTTP. Production (M10) uses {$CHIRPO_DOMAIN} for automatic HTTPS.
+:80 {
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle /webhooks/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		respond "chirpo dashboard: coming in M8" 404
+	}
+}

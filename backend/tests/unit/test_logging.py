@@ -147,3 +147,12 @@ def test_counts_with_token_in_the_name_are_not_redacted(capsys: pytest.CaptureFi
 def test_http_client_request_logs_are_silenced() -> None:
     configure_logging(make_settings(log_format="json", log_level="DEBUG"))
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+
+
+def test_console_tracebacks_are_scrubbed(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(make_settings(log_format="console"))
+    try:
+        raise ConnectionError("postgresql+asyncpg://chirpo:HUNTER2@db/chirpo refused")
+    except ConnectionError:
+        get_logger().exception("db_failed")
+    assert "HUNTER2" not in capsys.readouterr().out
