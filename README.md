@@ -48,6 +48,8 @@ What runs (all on localhost only):
 
 The API and worker reload automatically when you edit `backend/src`. Logs: `docker compose logs -f api worker`.
 
+To connect GitHub, follow [docs/github-app.md](docs/github-app.md).
+
 Everyday commands (from `backend/`):
 
 ```bash

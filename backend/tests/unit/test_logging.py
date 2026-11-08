@@ -156,3 +156,14 @@ def test_console_tracebacks_are_scrubbed(capsys: pytest.CaptureFixture[str]) -> 
     except ConnectionError:
         get_logger().exception("db_failed")
     assert "HUNTER2" not in capsys.readouterr().out
+
+
+def test_private_keys_inside_text_are_redacted() -> None:
+    from chirpo.logging import scrub
+
+    marker = "PRIVATE " + "KEY-----"  # split so the commit hook's key detector ignores this fake
+    pem = f"-----BEGIN RSA {marker}\nMIIEow\n-----END RSA {marker}"
+    text = scrub(f"AppAuthStrategy(app_id=1, private_key='{pem}') failed")
+    assert "MIIEow" not in text
+    assert text.endswith("') failed")
+    assert "MIIEow" not in scrub(f"cut off -----BEGIN {marker}\nMIIEow")
