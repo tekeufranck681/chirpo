@@ -574,3 +574,20 @@ async def test_closing_links_are_read_for_this_repo_only(
     node = pr_node(closingIssuesReferences=links)
     github.post(GRAPHQL).respond(json={"data": {"repository": {"pullRequest": node}}})
     assert (await adapter.get_pull_request(REPO, 15)).closes_issues == (12, 14)
+
+
+async def test_current_login_is_looked_up_by_account_id(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    user = payload("user")
+    github.get(f"/user/{user['id']}").respond(json=user)
+    github.get("/user/999").respond(404, json={"message": "Not Found"})
+    assert await adapter.current_login(REPO, str(user["id"])) == "tekeufranck681"
+    assert await adapter.current_login(REPO, "999") is None
+
+
+async def test_current_login_rejects_ids_that_are_not_numbers(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    assert await adapter.current_login(REPO, "../users/x") is None
+    assert not github.calls

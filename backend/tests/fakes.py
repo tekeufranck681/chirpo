@@ -112,6 +112,7 @@ class FakeCodeHost:
         self.comments: list[tuple[str, int, str]] = []
         self.labels: dict[str, set[str]] = {}
         self.users: set[str] = {"franck"}
+        self.logins: dict[str, str] = {}  # account id -> current login
         self.default_branch = "main"
         self.permissions: dict[tuple[str, str], RepoPermission] = {}
         self._last_number: dict[str, int] = {}
@@ -207,6 +208,9 @@ class FakeCodeHost:
 
     async def user_exists(self, repo: RepoRef, username: str) -> bool:
         return any(same_login(username, user) for user in self.users)
+
+    async def current_login(self, repo: RepoRef, user_id: str) -> str | None:
+        return self.logins.get(user_id)
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission:
         return self.permissions.get((repo.key, username.casefold()), RepoPermission.NONE)
