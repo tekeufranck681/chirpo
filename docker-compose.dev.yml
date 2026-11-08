@@ -49,6 +49,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  poller:
+    <<: *backend
+    command: ["watchfiles", "--filter", "python", "chirpo poll", "/app/src"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   caddy:
     image: caddy:2.11.7-alpine
     ports:

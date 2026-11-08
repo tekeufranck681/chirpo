@@ -280,3 +280,20 @@ async def test_timeout_is_not_reported_as_safe_to_retry(
 
 async def test_aclose_shuts_the_bot_down(adapter: TelegramAdapter) -> None:
     await adapter.aclose()
+
+
+async def test_fetch_updates_long_polls_from_the_offset(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    route = api.post("/getUpdates").respond(json={"ok": True, "result": [load("group_command")]})
+    updates = await adapter.fetch_updates(offset=900001, wait_seconds=30)
+
+    assert [u["update_id"] for u in updates] == [900001]
+    body = route.calls[0].request.content.decode()
+    assert "offset=900001" in body
+    assert "timeout=30" in body
+    assert adapter.parse_update(updates[0]) is not None
+
+
+def test_event_source_names_the_bot(adapter: TelegramAdapter) -> None:
+    assert adapter.event_source == "telegram:7000000001"
