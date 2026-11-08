@@ -302,6 +302,19 @@ class GitHubAdapter:
             return False
         return True
 
+    async def current_login(self, repo: RepoRef, user_id: str) -> str | None:
+        if not user_id.isdigit():
+            return None
+        try:
+            user = await self._call(
+                repo,
+                f"look up GitHub account {user_id}",
+                lambda gh: gh.rest.users.async_get_by_id(int(user_id)),
+            )
+        except CodeHostNotFoundError:
+            return None
+        return user.login
+
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission:
         if not _LOGIN.fullmatch(username):
             return RepoPermission.NONE

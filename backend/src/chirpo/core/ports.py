@@ -92,6 +92,11 @@ class CodeHostAdapter(Protocol):
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission: ...
 
+    async def current_login(self, repo: RepoRef, user_id: str) -> str | None:
+        """The account's login today (logins can be renamed and then taken by someone else).
+        None if the account no longer exists. `repo` says which installation to ask through."""
+        ...
+
     async def list_pull_requests(
         self, repo: RepoRef, query: PullRequestQuery
     ) -> list[PullRequest]: ...
