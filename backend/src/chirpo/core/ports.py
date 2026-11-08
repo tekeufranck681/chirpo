@@ -59,6 +59,9 @@ class CodeHostAdapter(Protocol):
     - Usernames and repo names are case-insensitive (`same_login`, `RepoRef.key`).
     - `permission_of` maps the host's own access levels onto RepoPermission.
     - `merge_pull_request` raises CodeHostConflictError when the PR can't be merged.
+    - Assignees the host can't assign (e.g. no access to the repo) may be dropped silently: the
+      returned issue lists who was really assigned, so compare before telling the chat.
+    - A repo the app can't reach (not installed, access removed) raises CodeHostForbiddenError.
     """
 
     provider: str
@@ -79,7 +82,9 @@ class CodeHostAdapter(Protocol):
         """Create the labels that don't exist yet; existing ones are left untouched."""
         ...
 
-    async def user_exists(self, username: str) -> bool: ...
+    async def user_exists(self, repo: RepoRef, username: str) -> bool:
+        """Whether the account exists. `repo` says which installation to ask through."""
+        ...
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission: ...
 

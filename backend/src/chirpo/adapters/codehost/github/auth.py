@@ -18,7 +18,7 @@ from githubkit_schemas.latest.models import Installation
 from chirpo.adapters.codehost.github.errors import retry_policy, translate_errors
 from chirpo.config import Settings
 from chirpo.core.domain import RepoRef
-from chirpo.core.errors import CodeHostNotFoundError
+from chirpo.core.errors import CodeHostForbiddenError, CodeHostNotFoundError
 
 USER_AGENT = "chirpo"
 
@@ -96,6 +96,10 @@ class GitHubAuth:
             self._app.as_installation(installation_id, repositories=[repo.name.lower()])
         )
 
+    def forget(self, repo: RepoRef) -> None:
+        """Drop the cached installation, e.g. after the App was reinstalled (its id changes)."""
+        self._installations.pop(repo.key, None)
+
     async def whoami(self) -> Identity:
         if self._app is not None:
             with translate_errors("get the GitHub App"):
@@ -124,7 +128,7 @@ class GitHubAuth:
                     repo.owner, repo.name
                 )
         except CodeHostNotFoundError as exc:
-            raise CodeHostNotFoundError(
+            raise CodeHostForbiddenError(
                 f"The GitHub App is not installed on {repo.full_name}, or the repo doesn't exist"
             ) from exc
         self._installations[repo.key] = response.parsed_data.id

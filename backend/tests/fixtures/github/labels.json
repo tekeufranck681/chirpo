@@ -1,0 +1,134 @@
+[
+  {
+    "id": 13002017582,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLLg",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/accessibility",
+    "name": "accessibility",
+    "color": "f143ab",
+    "default": true,
+    "description": "Barrier affecting people with disabilities",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017563,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLGw",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/bug",
+    "name": "bug",
+    "color": "d73a4a",
+    "default": true,
+    "description": "Something isn't working",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002929059,
+    "node_id": "LA_kwDOVnAV6M8AAAADBwjzow",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/dependencies",
+    "name": "dependencies",
+    "color": "0366d6",
+    "default": false,
+    "description": "Pull requests that update a dependency file",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017601,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLQQ",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/documentation",
+    "name": "documentation",
+    "color": "0075ca",
+    "default": true,
+    "description": "Improvements or additions to documentation",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017619,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLUw",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/duplicate",
+    "name": "duplicate",
+    "color": "cfd3d7",
+    "default": true,
+    "description": "This issue or pull request already exists",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017637,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLZQ",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/enhancement",
+    "name": "enhancement",
+    "color": "a2eeef",
+    "default": true,
+    "description": "New feature or request",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017683,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLkw",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/good%20first%20issue",
+    "name": "good first issue",
+    "color": "7057ff",
+    "default": true,
+    "description": "Good for newcomers",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017658,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLeg",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/help%20wanted",
+    "name": "help wanted",
+    "color": "008672",
+    "default": true,
+    "description": "Extra attention is needed",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017706,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLqg",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/invalid",
+    "name": "invalid",
+    "color": "e4e669",
+    "default": true,
+    "description": "This doesn't seem right",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002929091,
+    "node_id": "LA_kwDOVnAV6M8AAAADBwjzww",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/python:uv",
+    "name": "python:uv",
+    "color": "2b67c6",
+    "default": false,
+    "description": "Pull requests that update python:uv code",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017730,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsLwg",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/question",
+    "name": "question",
+    "color": "d876e3",
+    "default": true,
+    "description": "Further information is requested",
+    "archived_at": null,
+    "archived_by": null
+  },
+  {
+    "id": 13002017749,
+    "node_id": "LA_kwDOVnAV6M8AAAADBvsL1Q",
+    "url": "https://api.github.com/repos/tekeufranck681/chirpo/labels/wontfix",
+    "name": "wontfix",
+    "color": "ffffff",
+    "default": true,
+    "description": "This will not be worked on",
+    "archived_at": null,
+    "archived_by": null
+  }
+]

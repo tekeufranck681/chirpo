@@ -120,6 +120,10 @@ class FakeCodeHost:
         self._clock += timedelta(minutes=1)
         return self._clock
 
+    def _assignable(self, logins: tuple[str, ...]) -> tuple[str, ...]:
+        """Like GitHub: people who can't be assigned are dropped without an error."""
+        return tuple(login for login in logins if any(same_login(login, u) for u in self.users))
+
     def add_pull_request(self, repo: RepoRef, **fields: Any) -> PullRequest:
         number = self._next_number(repo)
         values: dict[str, Any] = {
@@ -146,7 +150,7 @@ class FakeCodeHost:
             title=issue.title,
             body=issue.body,
             state=IssueState.OPEN,
-            assignees=issue.assignees,
+            assignees=self._assignable(issue.assignees),
             labels=issue.labels,
             url=f"https://fake.example/{repo.full_name}/issues/{number}",
             created_at=now,
@@ -164,6 +168,8 @@ class FakeCodeHost:
     async def update_issue(self, repo: RepoRef, number: int, patch: IssuePatch) -> Issue:
         current = await self.get_issue(repo, number)
         changes = patch.model_dump(exclude_none=True)
+        if "assignees" in changes:
+            changes["assignees"] = self._assignable(changes["assignees"])
         if changes.get("state") == IssueState.OPEN:
             changes.setdefault("close_reason", None)
         updated = Issue.model_validate(
@@ -194,7 +200,7 @@ class FakeCodeHost:
     async def ensure_labels(self, repo: RepoRef, labels: Sequence[LabelSpec]) -> None:
         self.labels.setdefault(repo.key, set()).update(label.name for label in labels)
 
-    async def user_exists(self, username: str) -> bool:
+    async def user_exists(self, repo: RepoRef, username: str) -> bool:
         return any(same_login(username, user) for user in self.users)
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission:
