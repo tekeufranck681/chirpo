@@ -1,0 +1,44 @@
+{
+  "update_id": 900020,
+  "message": {
+    "message_id": 21,
+    "from": {
+      "id": 111111,
+      "is_bot": false,
+      "first_name": "Franck",
+      "last_name": "Tekeu",
+      "username": "tekeufranck"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup",
+      "is_forum": true
+    },
+    "date": 1762600000,
+    "message_thread_id": 20,
+    "is_topic_message": true,
+    "text": "status of the release?",
+    "reply_to_message": {
+      "message_id": 20,
+      "from": {
+        "id": 7000000001,
+        "is_bot": true,
+        "first_name": "Chirpo Test",
+        "username": "chirpo_test_bot"
+      },
+      "chat": {
+        "id": -1001234567890,
+        "title": "chirpo test",
+        "type": "supergroup",
+        "is_forum": true
+      },
+      "date": 1762599400,
+      "message_thread_id": 20,
+      "forum_topic_created": {
+        "name": "chirpo",
+        "icon_color": 7322096
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "update_id": 900011,
+  "message": {
+    "message_id": 11,
+    "from": {
+      "id": 1087968824,
+      "is_bot": true,
+      "first_name": "Group",
+      "username": "GroupAnonymousBot"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "date": 1762600000,
+    "text": "/ping",
+    "sender_chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "entities": [
+      {
+        "offset": 0,
+        "length": 5,
+        "type": "bot_command"
+      }
+    ]
+  }
+}

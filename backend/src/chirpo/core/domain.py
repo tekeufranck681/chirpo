@@ -42,6 +42,8 @@ class ChatUser(BaseModel):
     display_name: str
     username: str | None = None
     is_bot: bool = False
+    # Posted "as the chat" (e.g. anonymous group admin): no individual identity, so no privileges.
+    is_anonymous: bool = False
 
 
 class InboundMessage(BaseModel):
