@@ -5,7 +5,16 @@ description = "Manage your GitHub from your team chat, in plain language. Open s
 license = "MIT"
 authors = [{ name = "tekeu-franck" }]
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "alembic>=1.16",
+    "asyncpg>=0.30",
+    "cryptography>=45",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.10",
+    "sentry-sdk>=2.30",
+    "sqlalchemy[asyncio]>=2.0.40",
+    "structlog>=25.4",
+]
 
 [project.urls]
 Repository = "https://github.com/tekeufranck681/chirpo"
@@ -24,8 +33,7 @@ dev = [
 ]
 
 [tool.uv]
-# Supply-chain cooldown: only install package versions published at least 14 days ago.
-# Most malicious releases are detected and pulled from PyPI within days.
+# Supply-chain cooldown (D18).
 exclude-newer = "14 days"
 
 # ---------------------------------------------------------------- ruff (lint + format)
@@ -48,19 +56,22 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is how pytest works
+"tests/**" = [
+    "S101",          # assert is how pytest works
+    "S105", "S106",  # fake secrets are normal test data
+]
 
 # ---------------------------------------------------------------- mypy
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"
 packages = ["chirpo"]
+exclude = ["alembic/versions/"]
 warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 check_untyped_defs = true
 
-# core/ is the heart of the project: strict typing, no exceptions (CLAUDE.md).
 [[tool.mypy.overrides]]
 module = ["chirpo.core", "chirpo.core.*"]
 strict = true
@@ -69,5 +80,8 @@ strict = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+# One loop for the run so the session-scoped engine fixture can be shared.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+markers = ["integration: needs a running Postgres (docker compose up -d postgres)"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
