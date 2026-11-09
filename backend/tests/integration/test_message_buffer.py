@@ -226,3 +226,15 @@ async def test_forgetting_a_workspace(stores: Stores) -> None:
     assert await stores.buffer.forget(workspace) == 1
     assert await stores.buffer.recent(workspace, chat) == []
     assert [m.text for m in await stores.buffer.recent(other, other_chat)] == ["theirs"]
+
+
+async def test_find_one_message(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await workspace_for(stores, chat)
+    sent = message(chat, "the one replied to")
+    await stores.buffer.remember(workspace, sent)
+    found = await stores.buffer.find(workspace, chat, sent.message_id)
+    assert found is not None
+    assert found.text == "the one replied to"
+    assert await stores.buffer.find(workspace, chat, "nope") is None
+    assert await stores.buffer.find(workspace, new_chat(), sent.message_id) is None

@@ -45,3 +45,10 @@ async def test_old_processed_events_are_pruned(engine: AsyncEngine) -> None:
     assert await events.prune(older_than_days=7) >= 1
     assert await events.claim("prune-test", old) is True
     assert await events.claim("prune-test", recent) is False
+
+
+async def test_a_released_event_can_be_claimed_again(engine: AsyncEngine) -> None:
+    events = SqlProcessedEvents(create_session_factory(engine))
+    assert await events.claim("telegram", "released-1")
+    await events.release("telegram", "released-1")
+    assert await events.claim("telegram", "released-1")

@@ -1,11 +1,15 @@
 """Message -> interpret -> validate -> authorise -> confirm -> execute.
 
-M3 handles deterministic commands (core/commands); interpretation by the LLM arrives in M4.
+Commands are handled deterministically (core/commands); anything else addressed to the bot goes to
+the interpreter (core/interpreter), which so far replies with what it would do.
 """
+
+import asyncio
 
 from chirpo.core import messages
 from chirpo.core.commands import COMMANDS, Request, Services
 from chirpo.core.domain import InboundEvent, InboundMessage
+from chirpo.core.interpreter import interpret
 from chirpo.core.ports import MessagingAdapter, ProcessedEvents
 from chirpo.core.router import is_explicitly_addressed, parse_command
 
@@ -21,8 +25,12 @@ async def handle_inbound(
         return
     if not is_explicitly_addressed(event):
         return  # unknown commands in a group may belong to another bot: stay quiet (D22)
-    text = messages.UNKNOWN_COMMAND if command is not None else messages.NOT_UNDERSTOOD_YET
-    await messaging.send_message(event.chat, text, reply_to=event.message_id)
+    if command is not None:
+        await messaging.send_message(
+            event.chat, messages.UNKNOWN_COMMAND, reply_to=event.message_id
+        )
+        return
+    await interpret(Request(event, event.text, messaging, services))
 
 
 async def process(
@@ -34,11 +42,18 @@ async def process(
     """Handle an event exactly once. Returns False for a duplicate delivery.
 
     The claim comes first: if handling then fails, the event is not retried, so a bot reply or an
-    action is never repeated (at-most-once after the claim, D31).
+    action is never repeated (at-most-once after the claim, D31). Only a job cancelled by a worker
+    shutdown gives its claim back, since the queue runs it again.
     """
     if not await processed.claim(messaging.event_source, event.event_id):
         return False
-    await handle_inbound(event, messaging, services)
+    try:
+        await handle_inbound(event, messaging, services)
+    except asyncio.CancelledError:
+        # The worker is stopping (deploy, restart) and the queue will retry this job: let the
+        # retry handle it instead of skipping it as a duplicate. Errors still aren't retried.
+        await asyncio.shield(processed.release(messaging.event_source, event.event_id))
+        raise
     # After handling: a buffer failure can't cost the command, and a request never reads itself.
     await _remember(event, services)
     return True

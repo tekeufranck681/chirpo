@@ -17,12 +17,13 @@ Commands:
 /unlink owner/repo - disconnect a repo (admins)
 /context on|off - keep recent messages so I understand follow-ups (admins)
 
-Soon you'll be able to just mention me:
-"@chirpo checkout crashes on Android, give it to Franck"."""
+Or just tell me what you need, mentioning me (in a private chat, just write):
+"{bot} checkout crashes on Android, give it to Franck"
+"{bot} move #12 to in progress and assign me"
+For now I show what I would do; confirming and running it comes soon."""
 
 UNKNOWN_COMMAND = "I don't know that command. Try /help."
 
-NOT_UNDERSTOOD_YET = "I can't understand free text yet. For now try /ping or /help."
 
 ABOUT = """chirpo: manage your GitHub from your team chat, in plain language.
 Open source, created by Tekeu Franck.
@@ -96,8 +97,9 @@ LINKED = "Linked {repo}."
 LINKED_DEFAULT = " It's the default repo for /issue."
 LINKED_ADMIN = " You're the admin of this chat's workspace."
 CONTEXT_NOTICE = (
-    "\n\nI keep this chat's messages for {hours} hours, encrypted, so I understand follow-ups "
-    'like "assign it to Kevin". An admin can turn this off with /context off.'
+    "\n\nI keep this chat's messages for {hours} hours, encrypted, and send recent ones with "
+    'requests to the language model, so I understand follow-ups like "assign it to Franck". '
+    "An admin can turn this off with /context off."
 )
 CONTEXT_IS_ON = (
     "I keep this chat's messages for {hours} hours as context. "
@@ -133,3 +135,61 @@ ISSUE_TITLE_TOO_LONG = "That title is too long for GitHub (256 characters at mos
 ISSUE_BODY = "Requested by @{login} via chirpo."
 ISSUE_CREATED = "Created #{number}: {title}\n{url}"
 ISSUE_FAILED = "GitHub didn't accept that issue ({reason}). Nothing was created."
+
+# Resolving what a message meant (D47)
+PERSON_UNKNOWN = (
+    "I don't know {name} here. They need to talk to me in this chat and link GitHub with /iam."
+)
+PERSON_NOT_LINKED = "{name} hasn't linked a GitHub account yet. They can send me /iam."
+PERSON_AMBIGUOUS = "Several people match {name}: {options}. Which one? Use their @name."
+REPO_NOT_LINKED = "{name} isn't linked to this chat. Linked repos: {repos}."
+REPO_AMBIGUOUS = "Several linked repos are called {name}: {options}. Which one?"
+ISSUE_NOT_FOUND_NUMBER = "There's no issue #{number} in {repo}."
+ISSUE_NOT_FOUND = 'I can\'t find an open issue matching "{description}". Which issue number?'
+ISSUE_NOT_FOUND_CLOSED = (
+    'I can\'t find a closed issue matching "{description}". Which issue number?'
+)
+ISSUE_AMBIGUOUS = 'Several open issues match "{description}": {options}. Which one?'
+LABELS_LEFT_OUT = "Left out, not labels in {repo}: {labels}."
+NO_SUCH_LABELS = "{repo} has no label {labels}. Its labels: {existing}."
+STATUS_UNKNOWN = 'I don\'t know the status "{status}". Use todo, in progress, review or done.'
+
+# Plain-language requests (D47)
+LLM_NOT_CONFIGURED = (
+    "I can't understand plain language on this chirpo: no language model is set up "
+    "(CHIRPO_LLM_API_KEY). Commands still work: /help"
+)
+LLM_BUSY = "I'm busy right now. Try again in a minute."
+GITHUB_TROUBLE = "I couldn't reach GitHub just now. Try again in a minute."
+LLM_REFUSED = "I can't help with that message."
+LLM_UNCLEAR = "I couldn't work out what to do. Try rephrasing, or see /help."
+LLM_UNAVAILABLE = "I can't reach my language model right now. Try again later; commands still work."
+NOT_A_REQUEST = (
+    'I can create and update issues for you, e.g. "{bot} checkout crashes on Android, '
+    'give it to Franck". See /help.'
+)
+DRY_RUN_HEADER = "Here's what I'd do (nothing runs yet; confirming comes soon):"
+DRY_CREATE = '• Create an issue in {repo}: "{title}"'
+DRY_ASSIGNED = "  assigned to {people}"
+DRY_LABELS = "  labels: {labels}"
+DRY_DETAILS = '  details: "{text}"'
+DRY_ASSIGN = "• Assign {people} to {issue}"
+DRY_UNASSIGN = "• Remove {people} from {issue}"
+DRY_STATUS = '• Move {issue} to "{status}"'
+DRY_ADD_LABELS = "• Add {labels} to {issue}"
+DRY_REMOVE_LABELS = "• Remove {labels} from {issue}"
+DRY_COMMENT = '• Comment on {issue}: "{text}"'
+DRY_CLOSE = "• Close {issue} as {reason}"
+DRY_REOPEN = "• Reopen {issue}"
+DRY_FILTER_ASSIGNEE = " assigned to {login}"
+DRY_FILTER_LABELS = " labelled {labels}"
+DRY_ISSUE = '#{number} "{title}"'
+ISSUES_TITLE = "{state} issues in {repo}{filters}:"
+ISSUES_NONE = "No {state} issues in {repo}{filters}."
+ISSUE_ITEM = "• #{number} {title}{people}"
+ISSUE_PEOPLE = " ({people})"
+ISSUE_ALSO = " (also {people})"
+FILTER_YOURS = " assigned to you"
+DRY_IN_REPO = " in {repo}"
+DRY_NOTE = "  ({note})"
+CLOSE_REASONS = {"completed": "done", "not_planned": "not planned", "duplicate": "a duplicate"}

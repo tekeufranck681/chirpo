@@ -25,11 +25,11 @@ class TestSystemPrompt:
 
 class TestInterpretRequest:
     def test_untrusted_text_is_wrapped_with_the_marker(self) -> None:
-        request = interpret_request("checkout crashes, give it to Paul", "Franck", marker="m7f3a")
+        request = interpret_request("checkout crashes, give it to Annie", "Franck", marker="m7f3a")
         assert request.message == (
             '<untrusted_m7f3a kind="chat_message">\n'
             "From: Franck\n"
-            "checkout crashes, give it to Paul\n"
+            "checkout crashes, give it to Annie\n"
             "</untrusted_m7f3a>"
         )
 

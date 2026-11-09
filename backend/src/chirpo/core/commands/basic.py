@@ -9,7 +9,7 @@ async def ping(request: Request) -> None:
 
 
 async def help_(request: Request) -> None:
-    await request.reply(messages.HELP)
+    await request.reply(messages.HELP.format(bot=request.messaging.bot_mention()))
 
 
 async def about(request: Request) -> None:

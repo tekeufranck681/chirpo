@@ -1,7 +1,7 @@
 """What the LLM may propose (D44). Each proposal is a strict Pydantic model; the registry links it
 to the permission it needs and whether a person must confirm it before it runs.
 
-People, issues and repos stay exactly as the message named them ("Kevin", "the checkout bug",
+People, issues and repos stay exactly as the message named them ("Franck", "the checkout bug",
 "api"): code resolves them against the workspace later, so the model never picks a GitHub account.
 """
 
@@ -58,7 +58,7 @@ Line = Annotated[str, AfterValidator(_line)]
 Person = Annotated[
     Line,
     StringConstraints(min_length=1, max_length=100),
-    Field(description='A person as the message names them: "Kevin", "@kevin_t", or "me".'),
+    Field(description='A person as the message names them: "Franck", "@franck_t", or "me".'),
 ]
 Label = Annotated[Line, StringConstraints(min_length=1, max_length=50, pattern=r"^[^,]+$")]
 Body = Annotated[Text, StringConstraints(max_length=10_000)]

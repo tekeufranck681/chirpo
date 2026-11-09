@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -40,7 +41,7 @@ async def test_ping_replies_pong_to_the_same_message() -> None:
 
 @pytest.mark.parametrize("command", ["/help", "/start"])
 async def test_help_and_start_list_the_commands(command: str) -> None:
-    assert await _replies(text=command) == [messages.HELP]
+    assert await _replies(text=command) == [messages.HELP.format(bot="@chirpo_bot")]
 
 
 async def test_about_credits_the_creator_and_links_the_repo() -> None:
@@ -58,14 +59,16 @@ async def test_unknown_command_meant_for_us_points_to_help(flag: str) -> None:
     assert await _replies(text="/frobnicate", **{flag: True}) == [messages.UNKNOWN_COMMAND]
 
 
-async def test_mention_without_command_gets_a_not_yet_reply() -> None:
+async def test_a_plain_request_goes_to_the_interpreter() -> None:
     replies = await _replies(text="create an issue", mentions_bot=True)
-    assert replies == [messages.NOT_UNDERSTOOD_YET]
+    assert replies == [messages.GITHUB_NOT_CONFIGURED]  # no services in this test
 
 
 async def test_mention_followed_by_a_command_runs_the_command() -> None:
     # The adapter strips "@chirpo", so "@chirpo /help" arrives as "/help" with mentions_bot.
-    assert await _replies(text="/help", mentions_bot=True) == [messages.HELP]
+    assert await _replies(text="/help", mentions_bot=True) == [
+        messages.HELP.format(bot="@chirpo_bot")
+    ]
 
 
 async def test_plain_group_chatter_is_ignored() -> None:
@@ -86,6 +89,34 @@ async def test_button_presses_are_ignored_for_now() -> None:
 def test_timestamps_must_carry_a_timezone() -> None:
     with pytest.raises(ValidationError):
         make_message("/ping", sent_at=datetime(2026, 1, 1))
+
+
+async def test_a_message_cut_off_by_a_shutdown_is_handled_on_the_retry() -> None:
+    """A worker stopping mid-job (deploy, restart) cancels it and the queue retries it; the
+    retry must not be skipped as a duplicate, or the message is lost."""
+    import asyncio
+
+    class SlowMessaging(FakeMessaging):
+        def __init__(self) -> None:
+            super().__init__()
+            self.slow = True
+
+        async def send_message(self, chat: Any, text: str, *, reply_to: str | None = None) -> Any:
+            if self.slow:
+                await asyncio.sleep(10)
+            return await super().send_message(chat, text, reply_to=reply_to)
+
+    messaging, processed = SlowMessaging(), FakeProcessedEvents()
+    message = make_message("/ping")
+    job = asyncio.create_task(process(message, messaging, processed))
+    await asyncio.sleep(0.01)
+    job.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await job
+
+    messaging.slow = False
+    assert await process(message, messaging, processed) is True
+    assert [text for _, text, _ in messaging.sent] == [messages.PONG]
 
 
 async def test_process_handles_an_event_once() -> None:
@@ -140,9 +171,9 @@ class TestRemembering:
         world = await _linked()
         await world.send(
             make_message("checkout crashes on Android", event_id="1", message_id="10"),
-            make_message("assign it to Kevin", event_id="2", message_id="11", mentions_bot=True),
+            make_message("assign it to Franck", event_id="2", message_id="11", mentions_bot=True),
         )
-        assert world.kept() == ["checkout crashes on Android", "assign it to Kevin"]
+        assert world.kept() == ["checkout crashes on Android", "assign it to Franck"]
 
     async def test_not_in_an_unlinked_chat(self) -> None:
         world = World()
@@ -190,7 +221,7 @@ class TestRemembering:
         world.services = replace(world.services, buffer=Broken(timedelta(hours=24)))
         with pytest.raises(RuntimeError):
             await world.send(make_message("hi", mentions_bot=True))
-        assert [text for _, text, _ in world.messaging.sent] == [messages.NOT_UNDERSTOOD_YET]
+        assert [text for _, text, _ in world.messaging.sent] == [messages.LLM_NOT_CONFIGURED]
 
     async def test_not_when_the_team_turned_context_off(self) -> None:
         world = await _linked()

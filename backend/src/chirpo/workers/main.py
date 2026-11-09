@@ -1,11 +1,13 @@
 from datetime import timedelta
 from typing import Any, ClassVar
 
+import httpx
 from arq import cron, func
 
 from chirpo.adapters.codehost.github.adapter import GitHubAdapter
 from chirpo.adapters.codehost.github.auth import GitHubAuth
 from chirpo.adapters.codehost.github.device import GitHubDeviceLogin
+from chirpo.adapters.llm import llm_from_settings
 from chirpo.adapters.messaging.connect import connect_messaging
 from chirpo.config import Settings, get_settings
 from chirpo.core.commands import Services
@@ -94,6 +96,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         ctx["encryptor"],
         timedelta(hours=settings.message_buffer_hours),
     )
+    ctx["http"] = httpx.AsyncClient()  # shared by outbound calls such as the LLM's (D45)
     ctx["services"] = await _services(ctx, settings)
     services = ctx["services"]
     log.info(
@@ -101,6 +104,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         platforms=sorted(ctx["messaging"]),
         github=services is not None,
         github_login=bool(services and services.identity),
+        llm=services.llm.model if services and services.llm else None,
     )
 
 
@@ -136,6 +140,7 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         app_install_url=await _app_install_url(auth),
         buffer=ctx["buffer"] if settings.message_buffer_hours else None,
         context_hours=settings.message_buffer_hours,
+        llm=llm_from_settings(settings, client=ctx["http"]),
     )
 
 
@@ -156,6 +161,8 @@ async def shutdown(ctx: dict[str, Any]) -> None:
         await adapter.aclose()
     if "device_login" in ctx:
         await ctx["device_login"].aclose()
+    if "http" in ctx:
+        await ctx["http"].aclose()
     if "engine" in ctx:
         await ctx["engine"].dispose()
 

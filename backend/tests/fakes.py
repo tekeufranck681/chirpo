@@ -1,10 +1,12 @@
 """Fake adapters for testing the core without network calls."""
 
+import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+from chirpo.core.actions import Proposal
 from chirpo.core.domain import (
     ChatRef,
     ChatUser,
@@ -36,12 +38,12 @@ from chirpo.core.errors import (
     LastAdminError,
     MessagingForbiddenError,
 )
-from chirpo.core.llm import MAX_MESSAGE_CHARS
+from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
 CHAT = ChatRef(platform="fake", chat_id="-100")
-USER = ChatUser(platform="fake", user_id="42", display_name="Paul", username="paul")
+USER = ChatUser(platform="fake", user_id="42", display_name="Annie", username="annie")
 
 
 def make_message(text: str, **overrides: Any) -> InboundMessage:
@@ -68,6 +70,7 @@ class FakeMessaging:
     def __init__(self) -> None:
         self.sent: list[tuple[ChatRef, str, str | None]] = []
         self.edited: list[tuple[SentMessage, str]] = []
+        self.typing: list[ChatRef] = []
         self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
         self.chat_admins: set[str] = set()  # user ids that run the group
 
@@ -85,11 +88,17 @@ class FakeMessaging:
     async def edit_message(self, message: SentMessage, text: str) -> None:
         self.edited.append((message, text))
 
+    async def show_typing(self, chat: ChatRef) -> None:
+        self.typing.append(chat)
+
     def private_chat(self, user: ChatUser) -> ChatRef:
         return ChatRef(platform=self.platform, chat_id=user.user_id)
 
     def private_chat_link(self) -> str:
         return "https://chat.example/chirpo?start=iam"
+
+    def bot_mention(self) -> str:
+        return "@chirpo_bot"
 
     async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
         return user.user_id in self.chat_admins
@@ -108,6 +117,29 @@ class FakeProcessedEvents:
             return False
         self.claimed.add(key)
         return True
+
+    async def release(self, source: str, external_id: str) -> None:
+        self.claimed.discard((source, external_id))
+
+
+class FakeLLM:
+    """Answers with scripted proposals or errors, in order; keeps the requests it got."""
+
+    model = "fake-llm"
+
+    def __init__(self, *answers: Sequence[Proposal] | Exception, delay: float = 0) -> None:
+        self.answers = list(answers)
+        self.requests: list[InterpretRequest] = []
+        self.delay = delay  # seconds the "model" takes to answer
+
+    async def interpret(self, request: InterpretRequest) -> Interpretation:
+        self.requests.append(request)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return Interpretation(tuple(answer), self.model)
 
 
 class FakeMessageBuffer:
@@ -167,6 +199,16 @@ class FakeMessageBuffer:
             removed += len(entries) - len(fresh)
             self._kept[key] = fresh
         return removed
+
+    async def find(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> RecentMessage | None:
+        found = [
+            m
+            for m in await self.recent(workspace_id, chat, limit=10**6)
+            if m.message_id == message_id
+        ]
+        return found[0] if found else None
 
     async def forget(self, workspace_id: UUID) -> int:
         removed = 0
@@ -296,6 +338,9 @@ class FakeCodeHost:
         await self.get_issue(repo, number)
         self.comments.append((repo.key, number, body))
         return f"https://fake.example/{repo.full_name}/issues/{number}#comment-{len(self.comments)}"
+
+    async def list_labels(self, repo: RepoRef) -> list[str]:
+        return sorted(self.labels.get(repo.key, set()))
 
     async def ensure_labels(self, repo: RepoRef, labels: Sequence[LabelSpec]) -> None:
         self.labels.setdefault(repo.key, set()).update(label.name for label in labels)

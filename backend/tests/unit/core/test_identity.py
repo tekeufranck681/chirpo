@@ -150,7 +150,7 @@ async def test_iam_in_a_group_sends_the_code_privately(world: World) -> None:
     await world.identity.start(make_message("/iam"), world.messaging)
 
     (private_text,) = world.texts(PRIVATE)
-    assert private_text.startswith("Paul,")
+    assert private_text.startswith("Annie,")
     assert "Only approve if you sent /iam yourself" in private_text
     assert "https://github.com/login/device" in private_text
     assert "WDJB-MJHT" in private_text
@@ -333,7 +333,7 @@ async def test_iam_is_routed_to_identity_linking(world: World, text: str) -> Non
 async def test_plain_start_still_shows_help(world: World) -> None:
     await handle_inbound(make_message("/start"), world.messaging, world.services)
     assert world.login.started == 0
-    assert world.texts(CHAT) == [messages.HELP]
+    assert world.texts(CHAT) == [messages.HELP.format(bot="@chirpo_bot")]
 
 
 async def test_iam_without_github_login_configured(world: World) -> None:
