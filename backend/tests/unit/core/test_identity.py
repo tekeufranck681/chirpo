@@ -4,6 +4,7 @@ import pytest
 from pydantic import SecretStr
 
 from chirpo.core import messages
+from chirpo.core.commands import Services
 from chirpo.core.domain import AuditResult, ChatRef
 from chirpo.core.errors import CodeHostForbiddenError, CodeHostUnavailableError
 from chirpo.core.identity import (
@@ -13,12 +14,14 @@ from chirpo.core.identity import (
     LoginStatus,
     PendingLogin,
 )
+from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import handle_inbound
 from chirpo.core.workspaces import CodeHostAccount
 from tests.fakes import (
     CHAT,
     USER,
     FakeAuditLog,
+    FakeCodeHost,
     FakeMembers,
     FakeMessaging,
     FakeWorkspaces,
@@ -110,6 +113,18 @@ class World:
             audit=self.audit,
             jobs=self.jobs,
             now=self.clock,
+        )
+
+    @property
+    def services(self) -> Services:
+        codehost = FakeCodeHost()
+        return Services(
+            workspaces=self.workspaces,
+            members=self.members,
+            audit=self.audit,
+            codehost=codehost,
+            permissions=PermissionChecker(codehost),
+            identity=self.identity,
         )
 
     def texts(self, chat: ChatRef) -> list[str]:
@@ -311,12 +326,12 @@ async def test_a_member_removed_meanwhile_is_not_linked(world: World) -> None:
 
 @pytest.mark.parametrize("text", ["/iam", "/start iam"])
 async def test_iam_is_routed_to_identity_linking(world: World, text: str) -> None:
-    await handle_inbound(make_message(text), world.messaging, world.identity)
+    await handle_inbound(make_message(text), world.messaging, world.services)
     assert world.login.started == 1
 
 
 async def test_plain_start_still_shows_help(world: World) -> None:
-    await handle_inbound(make_message("/start"), world.messaging, world.identity)
+    await handle_inbound(make_message("/start"), world.messaging, world.services)
     assert world.login.started == 0
     assert world.texts(CHAT) == [messages.HELP]
 
@@ -338,7 +353,7 @@ async def linked(world: World) -> None:
 
 async def test_iam_when_already_linked_sends_no_code(world: World) -> None:
     await linked(world)
-    await handle_inbound(make_message("/iam", message_id="20"), world.messaging, world.identity)
+    await handle_inbound(make_message("/iam", message_id="20"), world.messaging, world.services)
     assert world.texts(CHAT) == [messages.IAM_ALREADY_LINKED.format(login="tekeufranck681")]
     assert world.login.started == 1  # only the first, original login
     assert world.jobs.scheduled == []
@@ -347,7 +362,7 @@ async def test_iam_when_already_linked_sends_no_code(world: World) -> None:
 @pytest.mark.parametrize("text", ["/iam switch", "/iam SWITCH"])
 async def test_iam_switch_starts_a_new_login(world: World, text: str) -> None:
     await linked(world)
-    await handle_inbound(make_message(text, message_id="20"), world.messaging, world.identity)
+    await handle_inbound(make_message(text, message_id="20"), world.messaging, world.services)
     assert world.login.started == 2
     assert len(world.jobs.scheduled) == 1
 

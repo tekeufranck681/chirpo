@@ -51,3 +51,7 @@ class CodeHostRateLimitedError(CodeHostError):
 
 class CodeHostUnavailableError(CodeHostError):
     """Network problem or code host outage; retrying later may succeed."""
+
+
+class LastAdminError(Exception):
+    """The change would leave a workspace without an admin."""

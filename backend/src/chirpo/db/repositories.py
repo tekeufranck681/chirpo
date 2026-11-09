@@ -8,7 +8,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chirpo.core.domain import ChatRef, ChatUser, IdentityKind, RepoRef
-from chirpo.core.permissions import Role
+from chirpo.core.errors import LastAdminError
+from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 from chirpo.db import models as db
 from chirpo.db.models import PollCursor, ProcessedEvent
@@ -157,11 +158,24 @@ class SqlWorkspaces:
             return [_to_linked_repo(row) for row in (await session.execute(statement)).scalars()]
 
     async def link_repo(
-        self, workspace_id: UUID, repo: RepoRef, *, installation_id: int | None = None
-    ) -> LinkedRepo:
+        self,
+        workspace_id: UUID,
+        repo: RepoRef,
+        *,
+        installation_id: int | None = None,
+        first_admin: UUID | None = None,
+    ) -> LinkedRepo | None:
         async with self._sessions.begin() as session:
             await _lock_workspace(session, workspace_id)
             in_workspace = db.RepoConnection.workspace_id == workspace_id
+            if first_admin is not None:
+                if await session.scalar(select(func.count()).where(in_workspace)):
+                    return None
+                await session.execute(
+                    update(db.Member)
+                    .where(db.Member.workspace_id == workspace_id, db.Member.id == first_admin)
+                    .values(role=Role.ADMIN)
+                )
             existing = await session.scalar(
                 select(db.RepoConnection).where(in_workspace, *_same_repo(repo))
             )
@@ -260,6 +274,17 @@ class SqlMembers:
 
     async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None:
         async with self._sessions.begin() as session:
+            await _lock_workspace(session, workspace_id)  # two admins demoting each other at once
+            target = await _load_members(session, workspace_id, [member_id])
+            if not target:
+                return None
+            admins = await session.scalar(
+                select(func.count()).where(
+                    db.Member.workspace_id == workspace_id, db.Member.role == Role.ADMIN
+                )
+            )
+            if role_change_refusal(target[0], role, admins or 0):
+                raise LastAdminError
             updated = await session.scalar(
                 update(db.Member)
                 .where(db.Member.workspace_id == workspace_id, db.Member.id == member_id)

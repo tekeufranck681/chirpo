@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Self
 
 from telegram import Bot, LinkPreviewOptions, Message, ReplyParameters, Update, User
+from telegram.constants import ChatMemberStatus
 from telegram.error import (
     BadRequest,
     Forbidden,
@@ -132,6 +133,12 @@ class TelegramAdapter:
 
     def private_chat_link(self) -> str:
         return f"https://t.me/{self._bot_username}?start=iam"
+
+    async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
+        member = await _translate_errors(
+            lambda: self._bot.get_chat_member(chat_id=int(chat.chat_id), user_id=int(user.user_id))
+        )
+        return member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR)
 
     async def edit_message(self, message: SentMessage, text: str) -> None:
         try:
