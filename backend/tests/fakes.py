@@ -28,7 +28,11 @@ from chirpo.core.domain import (
     SentMessage,
     same_login,
 )
-from chirpo.core.errors import CodeHostConflictError, CodeHostNotFoundError
+from chirpo.core.errors import (
+    CodeHostConflictError,
+    CodeHostNotFoundError,
+    MessagingForbiddenError,
+)
 from chirpo.core.permissions import Role
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -60,6 +64,7 @@ class FakeMessaging:
     def __init__(self) -> None:
         self.sent: list[tuple[ChatRef, str, str | None]] = []
         self.edited: list[tuple[SentMessage, str]] = []
+        self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
 
     def parse_update(self, raw: Mapping[str, Any]) -> InboundEvent | None:
         return None
@@ -67,11 +72,19 @@ class FakeMessaging:
     async def send_message(
         self, chat: ChatRef, text: str, *, reply_to: str | None = None
     ) -> SentMessage:
+        if chat.chat_id in self.unreachable_chats:
+            raise MessagingForbiddenError(f"can't message {chat.chat_id}")
         self.sent.append((chat, text, reply_to))
         return SentMessage(chat=chat, message_id=str(100 + len(self.sent)))
 
     async def edit_message(self, message: SentMessage, text: str) -> None:
         self.edited.append((message, text))
+
+    def private_chat(self, user: ChatUser) -> ChatRef:
+        return ChatRef(platform=self.platform, chat_id=user.user_id)
+
+    def private_chat_link(self) -> str:
+        return "https://chat.example/chirpo?start=iam"
 
     async def aclose(self) -> None:
         pass

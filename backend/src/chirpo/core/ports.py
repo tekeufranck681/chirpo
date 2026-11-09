@@ -40,6 +40,14 @@ class MessagingAdapter(Protocol):
 
     async def edit_message(self, message: SentMessage, text: str) -> None: ...
 
+    def private_chat(self, user: ChatUser) -> ChatRef:
+        """The one-to-one chat between the bot and this user."""
+        ...
+
+    def private_chat_link(self) -> str:
+        """A link that opens a private chat with the bot (it may not message people first)."""
+        ...
+
     async def aclose(self) -> None: ...
 
 

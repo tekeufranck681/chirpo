@@ -127,6 +127,12 @@ class TelegramAdapter:
         )
         return SentMessage(chat=chat, message_id=str(sent.message_id))
 
+    def private_chat(self, user: ChatUser) -> ChatRef:
+        return ChatRef(platform=self.platform, chat_id=user.user_id)  # Telegram: same id
+
+    def private_chat_link(self) -> str:
+        return f"https://t.me/{self._bot_username}?start=iam"
+
     async def edit_message(self, message: SentMessage, text: str) -> None:
         try:
             await _translate_errors(
