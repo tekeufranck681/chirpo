@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     github_app_id: int | None = None
     github_app_private_key_path: Path | None = None
+    # Public, not a secret. Needed for /iam (device login); "Enable Device Flow" must be ticked.
+    github_app_client_id: str | None = None
     github_webhook_secret: SecretStr | None = None
     github_events_mode: IntakeMode = "polling"
     github_dev_token: SecretStr | None = None

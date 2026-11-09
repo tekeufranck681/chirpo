@@ -34,13 +34,19 @@ Contents write also lets the App push code, so you can keep Contents on read-onl
 want chirpo to merge pull requests. Leave the other permissions on "No access". Later chirpo
 features (repository creation, membership sync) will list the extra permissions they need.
 
+Under **Identifying and authorizing users**, tick **Enable Device Flow** and leave the Callback URL
+empty. This lets each person prove their GitHub account from the chat with `/iam` (they type a code
+on github.com, no callback or public URL needed). chirpo uses the resulting token once to learn who
+they are and keeps no user tokens.
+
 Click **Create GitHub App**.
 
 ## 2. Get the App ID and private key
 
 On the App's settings page:
 
-1. Copy the **App ID** (a number).
+1. Copy the **App ID** (a number) and the **Client ID** (starts with `Iv`; public, not a secret).
+   Don't generate a client secret: chirpo doesn't need one.
 2. Under **Private keys**, click **Generate a private key**. A `.pem` file downloads.
 3. Move it into the chirpo folder as `secrets/github-app.pem`, readable only by you:
 
@@ -66,6 +72,7 @@ In your `.env`:
 ```bash
 CHIRPO_GITHUB_APP_ID=123456
 CHIRPO_GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/chirpo/secrets/github-app.pem
+CHIRPO_GITHUB_APP_CLIENT_ID=Iv23li...
 ```
 
 The path is used when you run chirpo directly on your machine. With Docker Compose, the
@@ -107,6 +114,22 @@ approvals and mergeability):
 uv run chirpo github demo owner/repo           # read-only
 uv run chirpo github demo owner/repo --write   # also creates, comments on and closes a test issue
 ```
+
+## 6. Link your GitHub account from the chat
+
+Send `/iam` to the bot (in a group it answers in a private message). Open the link, enter the code,
+approve, and the bot confirms: "Done: you're @your-login on GitHub." chirpo now checks your own access
+to each repo before acting for you.
+
+You do this once. chirpo keeps no GitHub token, so there is no session to renew: it checks your current
+access live on every action. Sending `/iam` again just tells you which account is linked; `/iam_switch`
+links a different account instead.
+
+| Message | Fix |
+| --- | --- |
+| "GitHub account linking isn't set up" | Set `CHIRPO_GITHUB_APP_CLIENT_ID` and restart the worker; the log says what GitHub refused. |
+| `Tick 'Enable Device Flow'` in the worker log | Tick it in the App settings (step 1). |
+| "you haven't opened a private chat with me" | Open the link in that message, press Start, send `/iam` again. |
 
 ## Development shortcut: a personal access token
 
