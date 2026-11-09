@@ -1,4 +1,4 @@
-"""The `chirpo` command: api, worker, poll, telegram, github, migrate."""
+"""The `chirpo` command: api, worker, poll, telegram, github, llm, migrate."""
 
 import argparse
 import asyncio
@@ -206,6 +206,44 @@ async def _github_demo(auth: "GitHubAuth", repo: "RepoRef", *, write: bool) -> N
     print(f"Closed it ({closed.close_reason})")
 
 
+def run_llm(args: argparse.Namespace) -> None:
+    asyncio.run(_llm_try(args.text, args.sender))
+
+
+async def _llm_try(text: str, sender: str) -> None:
+    """Shows what the LLM proposes for a message, before anything reads chat or acts on GitHub."""
+    from chirpo.adapters import llm as llm_adapters
+    from chirpo.core.actions import permission_of, spec_of
+    from chirpo.core.errors import LLMError, LLMSetupError
+    from chirpo.core.llm import interpret_request
+
+    try:
+        provider = llm_adapters.llm_from_settings(get_settings())
+    except LLMSetupError as exc:
+        raise SystemExit(str(exc)) from exc
+    if provider is None:
+        raise SystemExit(
+            "Set CHIRPO_LLM_API_KEY in your .env (a Gemini key from https://aistudio.google.com/apikey)."
+        )
+    try:
+        result = await provider.interpret(interpret_request(text, sender))
+    except LLMError as exc:
+        detail = getattr(exc, "detail", "")
+        raise SystemExit(f"{exc}: {detail}" if detail else str(exc)) from exc
+    for proposal in result.proposals:
+        spec = spec_of(proposal)
+        permission = permission_of(proposal)
+        if permission is None:
+            print(f"{spec.name} (a reply, nothing on GitHub)")
+        else:
+            when = "needs confirmation" if spec.needs_confirmation else "runs right away"
+            print(f"{spec.name} ({when}, permission {permission})")
+        fields = proposal.model_dump(mode="json", exclude_defaults=True)
+        if fields:
+            print(json.dumps(fields, indent=2, ensure_ascii=False))
+    print(f"{result.model}: {result.input_tokens} tokens in, {result.output_tokens} out")
+
+
 def run_migrate(_args: argparse.Namespace) -> None:
     from alembic import command
     from alembic.config import Config
@@ -244,6 +282,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("repo", help="owner/repo")
     demo.add_argument("--write", action="store_true", help="also create and close a test issue")
     github.set_defaults(handler=run_github)
+    llm = commands.add_parser("llm", help="check the LLM provider")
+    llm_commands = llm.add_subparsers(dest="llm_command", required=True)
+    try_ = llm_commands.add_parser("try", help="show what the LLM proposes for a message")
+    try_.add_argument("text", help='the chat message, e.g. "checkout crashes, give it to Paul"')
+    try_.add_argument("--sender", default="Franck", help="the sender's display name")
+    llm.set_defaults(handler=run_llm)
     commands.add_parser("migrate", help="apply database migrations").set_defaults(
         handler=run_migrate
     )
