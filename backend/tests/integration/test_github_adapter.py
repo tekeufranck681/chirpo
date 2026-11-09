@@ -203,6 +203,16 @@ async def test_add_comment_returns_its_link(
 # ------------------------------------------------------------------ labels
 
 
+async def test_list_labels_keeps_their_spelling(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    route = github.get(LABELS).respond(json=payload("labels"))
+    names = await adapter.list_labels(REPO)
+    assert names[:3] == ["accessibility", "bug", "dependencies"]
+    assert "good first issue" in names
+    assert params(route) == {"per_page": str(PAGE_SIZE), "page": "1"}
+
+
 async def test_ensure_labels_creates_only_missing_ones(
     adapter: GitHubAdapter, github: respx.MockRouter
 ) -> None:
@@ -268,17 +278,17 @@ async def test_permission_of(
     expected: RepoPermission,
 ) -> None:
     body = {**payload("collaborator_permission"), "role_name": role_name, "permission": permission}
-    github.get("/repos/tekeufranck681/chirpo/collaborators/kevin/permission").respond(json=body)
-    assert await adapter.permission_of(REPO, "kevin") == expected
+    github.get("/repos/tekeufranck681/chirpo/collaborators/franck/permission").respond(json=body)
+    assert await adapter.permission_of(REPO, "franck") == expected
 
 
 async def test_non_collaborator_has_no_permission(
     adapter: GitHubAdapter, github: respx.MockRouter
 ) -> None:
-    github.get("/repos/tekeufranck681/chirpo/collaborators/kevin/permission").respond(
+    github.get("/repos/tekeufranck681/chirpo/collaborators/franck/permission").respond(
         404, json={"message": "Not Found"}
     )
-    assert await adapter.permission_of(REPO, "kevin") == RepoPermission.NONE
+    assert await adapter.permission_of(REPO, "franck") == RepoPermission.NONE
 
 
 # ------------------------------------------------------------------ App installation
@@ -333,14 +343,14 @@ async def test_permission_of_on_an_unreachable_repo_is_not_hidden(
 ) -> None:
     github.get(INSTALLATION).respond(404, json={"message": "Not Found"})
     with pytest.raises(CodeHostForbiddenError, match="not installed"):
-        await app_adapter.permission_of(REPO, "kevin")
+        await app_adapter.permission_of(REPO, "franck")
 
 
 async def test_dropped_assignees_show_in_the_result(
     adapter: GitHubAdapter, github: respx.MockRouter
 ) -> None:
     github.post(ISSUES).respond(201, json={**payload("issue"), "assignee": None, "assignees": []})
-    issue = await adapter.create_issue(REPO, NewIssue(title="x", assignees=("kevin",)))
+    issue = await adapter.create_issue(REPO, NewIssue(title="x", assignees=("franck",)))
     assert issue.assignees == ()
 
 
@@ -477,14 +487,14 @@ async def test_list_pull_requests_by_author_reads_more_pages(
     last_page = payload("graphql_pull_requests")
     connection = last_page["data"]["repository"]["pullRequests"]
     connection["pageInfo"] = {"hasNextPage": False, "endCursor": None}
-    connection["nodes"][0]["author"] = {"login": "Kevin", "__typename": "User"}
+    connection["nodes"][0]["author"] = {"login": "Franck", "__typename": "User"}
     route = github.post(GRAPHQL).mock(
         side_effect=[httpx.Response(200, json=first_page), httpx.Response(200, json=last_page)]
     )
 
-    pulls = await adapter.list_pull_requests(REPO, PullRequestQuery(author="kevin"))
+    pulls = await adapter.list_pull_requests(REPO, PullRequestQuery(author="franck"))
 
-    assert [pull.author for pull in pulls] == ["Kevin"]
+    assert [pull.author for pull in pulls] == ["Franck"]
     cursor = first_page["data"]["repository"]["pullRequests"]["pageInfo"]["endCursor"]
     assert graphql_variables(route)["after"] == cursor
     assert graphql_variables(route)["first"] == PAGE_SIZE

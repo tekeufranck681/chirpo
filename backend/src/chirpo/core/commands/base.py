@@ -12,6 +12,7 @@ from chirpo.core.permissions import Action, PermissionChecker, Refusal, Verdict
 from chirpo.core.ports import (
     AuditLog,
     CodeHostAdapter,
+    LLMProvider,
     Members,
     MessageBuffer,
     MessagingAdapter,
@@ -33,6 +34,7 @@ class Services:
     app_install_url: str | None = None
     buffer: MessageBuffer | None = None  # None: the instance keeps no messages (D46)
     context_hours: int = 0
+    llm: LLMProvider | None = None  # None: no plain language, commands only
 
 
 @dataclass(frozen=True, slots=True)

@@ -169,6 +169,18 @@ async def test_send_into_a_topic(adapter: TelegramAdapter, api: respx.MockRouter
     assert "message_thread_id=42" in route.calls[0].request.content.decode()
 
 
+async def test_show_typing_in_a_topic(adapter: TelegramAdapter, api: respx.MockRouter) -> None:
+    route = api.post("/sendChatAction").respond(json={"ok": True, "result": True})
+    await adapter.show_typing(GROUP.model_copy(update={"thread_id": "42"}))
+    sent = route.calls[0].request.content.decode()
+    assert "action=typing" in sent
+    assert "message_thread_id=42" in sent
+
+
+def test_the_bot_is_mentioned_by_its_username(adapter: TelegramAdapter) -> None:
+    assert adapter.bot_mention() == "@chirpo_test_bot"
+
+
 async def test_edit_message(adapter: TelegramAdapter, api: respx.MockRouter) -> None:
     route = api.post("/editMessageText").respond(json={"ok": True, "result": SENT})
     await adapter.edit_message(SentMessage(chat=GROUP, message_id="77"), "done")

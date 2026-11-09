@@ -38,6 +38,13 @@ class SqlProcessedEvents:
         async with self._sessions.begin() as session:
             return (await session.execute(statement)).scalar_one_or_none() is not None
 
+    async def release(self, source: str, external_id: str) -> None:
+        statement = delete(ProcessedEvent).where(
+            ProcessedEvent.source == source, ProcessedEvent.external_id == external_id
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
     async def prune(self, older_than_days: int) -> int:
         cutoff = func.now() - timedelta(days=older_than_days)
         statement = delete(ProcessedEvent).where(ProcessedEvent.received_at < cutoff)
@@ -118,6 +125,23 @@ class SqlMessageBuffer:
         async with self._sessions.begin() as session:
             result = await session.execute(statement)
             return int(result.rowcount)  # type: ignore[attr-defined]
+
+    async def find(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> RecentMessage | None:
+        cutoff = func.now() - self._retention
+        statement = select(db.BufferedMessage).where(
+            db.BufferedMessage.workspace_id == workspace_id,
+            db.BufferedMessage.platform == chat.platform,
+            db.BufferedMessage.chat_id == chat.chat_id,
+            db.BufferedMessage.thread_id.is_not_distinct_from(chat.thread_id),
+            db.BufferedMessage.message_id == message_id,
+            db.BufferedMessage.sent_at >= cutoff,
+            db.BufferedMessage.received_at >= cutoff,
+        )
+        async with self._sessions() as session:
+            row = (await session.execute(statement)).scalar_one_or_none()
+        return self._to_recent(row) if row else None
 
     async def forget(self, workspace_id: UUID) -> int:
         statement = delete(db.BufferedMessage).where(

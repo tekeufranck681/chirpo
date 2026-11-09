@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Self
 
 from telegram import Bot, LinkPreviewOptions, Message, ReplyParameters, Update, User
-from telegram.constants import ChatMemberStatus
+from telegram.constants import ChatAction, ChatMemberStatus
 from telegram.error import (
     BadRequest,
     Forbidden,
@@ -134,11 +134,23 @@ class TelegramAdapter:
     def private_chat_link(self) -> str:
         return f"https://t.me/{self._bot_username}?start=iam"
 
+    def bot_mention(self) -> str:
+        return f"@{self._bot_username}"
+
     async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
         member = await _translate_errors(
             lambda: self._bot.get_chat_member(chat_id=int(chat.chat_id), user_id=int(user.user_id))
         )
         return member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR)
+
+    async def show_typing(self, chat: ChatRef) -> None:
+        await _translate_errors(
+            lambda: self._bot.send_chat_action(
+                chat_id=int(chat.chat_id),
+                action=ChatAction.TYPING,
+                message_thread_id=int(chat.thread_id) if chat.thread_id else None,
+            )
+        )
 
     async def edit_message(self, message: SentMessage, text: str) -> None:
         try:

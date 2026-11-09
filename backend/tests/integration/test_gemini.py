@@ -102,7 +102,7 @@ class TestAnswers:
             CreateIssue(
                 title="Checkout crashes on Android 13",
                 body="The app crashes at checkout on Android 13.",
-                assignees=("Paul",),
+                assignees=("Annie",),
                 labels=("bug", "urgent"),
             ),
         )

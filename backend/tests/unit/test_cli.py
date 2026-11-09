@@ -98,8 +98,8 @@ def _unconfigured(monkeypatch: pytest.MonkeyPatch, **values: object) -> object:
 def test_llm_try_command() -> None:
     from chirpo.cli import run_llm
 
-    args = build_parser().parse_args(["llm", "try", "checkout crashes", "--sender", "Paul"])
-    assert (args.handler, args.text, args.sender) == (run_llm, "checkout crashes", "Paul")
+    args = build_parser().parse_args(["llm", "try", "checkout crashes", "--sender", "Annie"])
+    assert (args.handler, args.text, args.sender) == (run_llm, "checkout crashes", "Annie")
     assert build_parser().parse_args(["llm", "try", "hi"]).sender == "Franck"
 
 

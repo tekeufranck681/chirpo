@@ -146,7 +146,7 @@ async def test_members_are_created_on_first_contact(stores: Stores) -> None:
     workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
     franck = await stores.members.for_chat_user(workspace.id, chat_user())
     again = await stores.members.for_chat_user(workspace.id, chat_user())
-    kevin = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin", None))
+    annie = await stores.members.for_chat_user(workspace.id, chat_user("22", "Annie", None))
 
     assert again == franck
     assert (franck.role, franck.display_name, franck.chat_username) == (
@@ -155,10 +155,10 @@ async def test_members_are_created_on_first_contact(stores: Stores) -> None:
         "franck",
     )
     assert not franck.is_verified
-    assert kevin.id != franck.id
+    assert annie.id != franck.id
     assert {member.id for member in await stores.members.all(workspace.id)} == {
         franck.id,
-        kevin.id,
+        annie.id,
     }
 
 
@@ -248,15 +248,15 @@ async def test_one_account_claimed_twice_at_once_ends_with_one_member(stores: St
 async def test_the_first_link_makes_its_linker_admin(stores: Stores) -> None:
     workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
     franck = await stores.members.for_chat_user(workspace.id, chat_user("11"))
-    kevin = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+    annie = await stores.members.for_chat_user(workspace.id, chat_user("22", "Annie"))
 
     first = await stores.workspaces.link_repo(workspace.id, repo("acme/a"), first_admin=franck.id)
-    late = await stores.workspaces.link_repo(workspace.id, repo("acme/b"), first_admin=kevin.id)
+    late = await stores.workspaces.link_repo(workspace.id, repo("acme/b"), first_admin=annie.id)
 
     assert first is not None and first.is_default
     assert late is None  # not first any more: nothing linked, nobody promoted
     roles = {m.id: m.role for m in await stores.members.all(workspace.id)}
-    assert roles == {franck.id: Role.ADMIN, kevin.id: Role.MEMBER}
+    assert roles == {franck.id: Role.ADMIN, annie.id: Role.MEMBER}
     assert len(await stores.workspaces.repos(workspace.id)) == 1
 
 
@@ -280,13 +280,13 @@ async def test_simultaneous_first_links_make_one_admin(stores: Stores) -> None:
 async def test_the_last_admin_cannot_be_demoted(stores: Stores) -> None:
     workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
     franck = await stores.members.for_chat_user(workspace.id, chat_user("11"))
-    kevin = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+    annie = await stores.members.for_chat_user(workspace.id, chat_user("22", "Annie"))
     await stores.members.set_role(workspace.id, franck.id, Role.ADMIN)
 
     with pytest.raises(LastAdminError):
         await stores.members.set_role(workspace.id, franck.id, Role.MEMBER)
 
-    await stores.members.set_role(workspace.id, kevin.id, Role.ADMIN)
+    await stores.members.set_role(workspace.id, annie.id, Role.ADMIN)
     demoted = await stores.members.set_role(workspace.id, franck.id, Role.MAINTAINER)
     assert demoted is not None and demoted.role == Role.MAINTAINER
 
@@ -294,7 +294,7 @@ async def test_the_last_admin_cannot_be_demoted(stores: Stores) -> None:
 async def test_two_admins_demoting_each_other_keep_one(stores: Stores) -> None:
     workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
     a = await stores.members.for_chat_user(workspace.id, chat_user("11"))
-    b = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+    b = await stores.members.for_chat_user(workspace.id, chat_user("22", "Annie"))
     for member in (a, b):
         await stores.members.set_role(workspace.id, member.id, Role.ADMIN)
 

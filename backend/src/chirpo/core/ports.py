@@ -43,12 +43,20 @@ class MessagingAdapter(Protocol):
 
     async def edit_message(self, message: SentMessage, text: str) -> None: ...
 
+    async def show_typing(self, chat: ChatRef) -> None:
+        """Show that the bot is working on an answer (a few seconds; best effort)."""
+        ...
+
     def private_chat(self, user: ChatUser) -> ChatRef:
         """The one-to-one chat between the bot and this user."""
         ...
 
     def private_chat_link(self) -> str:
         """A link that opens a private chat with the bot (it may not message people first)."""
+        ...
+
+    def bot_mention(self) -> str:
+        """How people address the bot in a group, e.g. "@chirpo_dev_bot"."""
         ...
 
     async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
@@ -61,6 +69,10 @@ class MessagingAdapter(Protocol):
 class ProcessedEvents(Protocol):
     async def claim(self, source: str, external_id: str) -> bool:
         """Record an event as processed. False if it already was (a duplicate delivery)."""
+        ...
+
+    async def release(self, source: str, external_id: str) -> None:
+        """Forget a claim, so a retry of an event cut off mid-way is handled again."""
         ...
 
 
@@ -99,6 +111,10 @@ class CodeHostAdapter(Protocol):
 
     async def ensure_labels(self, repo: RepoRef, labels: Sequence[LabelSpec]) -> None:
         """Create the labels that don't exist yet; existing ones are left untouched."""
+        ...
+
+    async def list_labels(self, repo: RepoRef) -> list[str]:
+        """The repo's label names, spelled as on the code host."""
         ...
 
     async def user_exists(self, repo: RepoRef, username: str) -> bool:
@@ -204,6 +220,12 @@ class MessageBuffer(Protocol):
 
     async def prune(self) -> int:
         """Delete messages older than the retention time; returns how many."""
+        ...
+
+    async def find(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> RecentMessage | None:
+        """One kept message, e.g. the one a request replies to; None if unknown or expired."""
         ...
 
     async def forget(self, workspace_id: UUID) -> int:

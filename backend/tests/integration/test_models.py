@@ -29,7 +29,7 @@ async def _workspace(session: AsyncSession, name: str = "Acme") -> Workspace:
 
 async def test_defaults_are_filled_by_the_database(db_session: AsyncSession) -> None:
     workspace = await _workspace(db_session)
-    member = Member(workspace_id=workspace.id, display_name="Paul")
+    member = Member(workspace_id=workspace.id, display_name="Annie")
     db_session.add(member)
     await db_session.flush()
     await db_session.refresh(workspace)
@@ -97,7 +97,7 @@ async def test_deleting_a_workspace_removes_its_rows_but_keeps_the_audit_log(
     db_session: AsyncSession,
 ) -> None:
     workspace = await _workspace(db_session)
-    member = Member(workspace_id=workspace.id, display_name="Paul")
+    member = Member(workspace_id=workspace.id, display_name="Annie")
     db_session.add(member)
     await db_session.flush()
     audit = AuditEvent(

@@ -25,7 +25,7 @@ class FakeGitHub:
 
     def __init__(self, permissions: dict[tuple[str, str], RepoPermission] | None = None) -> None:
         self.permissions = permissions or {}
-        self.logins = {"42": "kevin-gh"}
+        self.logins = {"42": "franck-gh"}
         self.calls = 0
         self.fail = False
 
@@ -39,18 +39,20 @@ class FakeGitHub:
         return self.permissions.get((repo.key, username.casefold()), RepoPermission.NONE)
 
 
-def member(role: Role = Role.MEMBER, login: str | None = "kevin-gh", user_id: str = "42") -> Member:
+def member(
+    role: Role = Role.MEMBER, login: str | None = "franck-gh", user_id: str = "42"
+) -> Member:
     account = CodeHostAccount(provider="github", user_id=user_id, login=login) if login else None
     return Member(
         id=uuid.uuid4(),
         workspace_id=WORKSPACE,
-        display_name="Kevin",
+        display_name="Franck",
         role=role,
         codehost=account,
     )
 
 
-def github_with(permission: RepoPermission, login: str = "kevin-gh") -> FakeGitHub:
+def github_with(permission: RepoPermission, login: str = "franck-gh") -> FakeGitHub:
     return FakeGitHub({(SANDBOX.key, login): permission})
 
 
@@ -168,25 +170,25 @@ class Clock:
 async def test_granted_access_is_cached_briefly_per_repo_and_account() -> None:
     github = FakeGitHub(
         {
-            (SANDBOX.key, "kevin-gh"): RepoPermission.WRITE,
-            (OTHER.key, "kevin-gh"): RepoPermission.READ,
+            (SANDBOX.key, "franck-gh"): RepoPermission.WRITE,
+            (OTHER.key, "franck-gh"): RepoPermission.READ,
         }
     )
     clock = Clock()
     checker = PermissionChecker(github, ttl=timedelta(seconds=60), now=clock)
-    kevin = member()
+    franck = member()
 
-    await checker.check(kevin, Action.CREATE_ISSUE, SANDBOX)
-    await checker.check(kevin, Action.COMMENT, SANDBOX)
+    await checker.check(franck, Action.CREATE_ISSUE, SANDBOX)
+    await checker.check(franck, Action.COMMENT, SANDBOX)
     await checker.check(member(login="stored-old-login"), Action.VIEW, SANDBOX)  # same account
     assert github.calls == 1
 
-    await checker.check(kevin, Action.CREATE_ISSUE, OTHER)
+    await checker.check(franck, Action.CREATE_ISSUE, OTHER)
     assert github.calls == 2
 
-    github.permissions[(SANDBOX.key, "kevin-gh")] = RepoPermission.NONE  # access removed on GitHub
+    github.permissions[(SANDBOX.key, "franck-gh")] = RepoPermission.NONE  # access removed on GitHub
     clock.now += timedelta(seconds=61)
-    verdict = await checker.check(kevin, Action.CREATE_ISSUE, SANDBOX)
+    verdict = await checker.check(franck, Action.CREATE_ISSUE, SANDBOX)
     assert verdict.refusal == Refusal.NO_REPO_ACCESS
     assert github.calls == 3
 
@@ -195,7 +197,7 @@ async def test_a_refusal_is_not_cached() -> None:
     github = FakeGitHub()
     checker = PermissionChecker(github)
     assert not (await checker.check(member(), Action.CREATE_ISSUE, SANDBOX)).allowed
-    github.permissions[(SANDBOX.key, "kevin-gh")] = RepoPermission.READ  # added as collaborator
+    github.permissions[(SANDBOX.key, "franck-gh")] = RepoPermission.READ  # added as collaborator
     assert (await checker.check(member(), Action.CREATE_ISSUE, SANDBOX)).allowed
 
 

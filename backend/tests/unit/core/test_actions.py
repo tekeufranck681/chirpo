@@ -102,7 +102,7 @@ class TestPermissionOf:
     def test_plain_create_needs_only_create(self) -> None:
         assert permission_of(CreateIssue(title="a")) is Action.CREATE_ISSUE
 
-    @pytest.mark.parametrize("extra", [{"assignees": ["Kevin"]}, {"labels": ["deploy"]}])
+    @pytest.mark.parametrize("extra", [{"assignees": ["Franck"]}, {"labels": ["deploy"]}])
     def test_assigning_or_labelling_on_create_needs_triage(self, extra: dict[str, Any]) -> None:
         assert permission_of(CreateIssue.model_validate({"title": "a", **extra})) is (
             Action.TRIAGE_ISSUE
@@ -145,7 +145,7 @@ class TestUnsafeText:
             with pytest.raises(ValueError):
                 SetStatus.model_validate(arguments)
         with pytest.raises(ValueError):
-            AskClarifyingQuestion(question="Which\nKevin?")
+            AskClarifyingQuestion(question="Which\nFranck?")
 
     def test_bodies_keep_lines_tabs_and_emoji(self) -> None:
         body = "Steps:\n\t1. open checkout\n2. tap pay 👨\u200d💻"
@@ -317,19 +317,19 @@ class TestToolSpecs:
 class TestParseToolCall:
     def test_round_trip_every_action(self) -> None:
         examples: dict[str, dict[str, Any]] = {
-            "create_issue": {"title": "Login broken", "assignees": ["Kevin"], "labels": ["bug"]},
+            "create_issue": {"title": "Login broken", "assignees": ["Franck"], "labels": ["bug"]},
             "create_issues": {"issues": [{"title": "a"}, {"title": "b"}], "repo": "api"},
             "assign_issue": {"issue": ISSUE_12, "assignees": ["me"]},
-            "unassign_issue": {"issue": ISSUE_12, "assignees": ["Kevin"]},
+            "unassign_issue": {"issue": ISSUE_12, "assignees": ["Franck"]},
             "set_status": {"issue": {"description": "checkout bug"}, "status": "done"},
             "add_labels": {"issue": ISSUE_12, "labels": ["urgent"]},
             "remove_labels": {"issue": ISSUE_12, "labels": ["urgent"]},
             "comment_on_issue": {"issue": ISSUE_12, "body": "Fixed in 1.2"},
             "close_issue": {"issue": ISSUE_12, "reason": "duplicate"},
             "reopen_issue": {"issue": ISSUE_12},
-            "list_issues": {"assignee": "Kevin", "labels": ["bug"], "state": "all"},
+            "list_issues": {"assignee": "Franck", "labels": ["bug"], "state": "all"},
             "my_issues": {"state": "closed"},
-            "ask_clarifying_question": {"question": "Which Kevin?"},
+            "ask_clarifying_question": {"question": "Which Franck?"},
             "not_a_request": {},
         }
         assert set(examples) == set(ACTIONS)

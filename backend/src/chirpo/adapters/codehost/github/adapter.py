@@ -273,7 +273,10 @@ class GitHubAdapter:
                     raise  # a real validation error, not "created meanwhile by someone else"
 
     async def _label_names(self, repo: RepoRef) -> set[str]:
-        names: set[str] = set()
+        return {name.casefold() for name in await self.list_labels(repo)}
+
+    async def list_labels(self, repo: RepoRef) -> list[str]:
+        names: list[str] = []
         for page in range(1, MAX_LABEL_PAGES + 1):
 
             def list_page(gh: GitHub[Any], page: int = page) -> Awaitable[Response[Any, Any]]:
@@ -284,7 +287,7 @@ class GitHubAdapter:
             found: list[Label] = await self._call(
                 repo, f"list labels in {repo.full_name}", list_page
             )
-            names |= {label.name.casefold() for label in found}
+            names += [label.name for label in found]
             if len(found) < PAGE_SIZE:
                 break
         return names

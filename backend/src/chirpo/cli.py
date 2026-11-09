@@ -285,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     llm = commands.add_parser("llm", help="check the LLM provider")
     llm_commands = llm.add_subparsers(dest="llm_command", required=True)
     try_ = llm_commands.add_parser("try", help="show what the LLM proposes for a message")
-    try_.add_argument("text", help='the chat message, e.g. "checkout crashes, give it to Paul"')
+    try_.add_argument("text", help='the chat message, e.g. "checkout crashes, give it to Annie"')
     try_.add_argument("--sender", default="Franck", help="the sender's display name")
     llm.set_defaults(handler=run_llm)
     commands.add_parser("migrate", help="apply database migrations").set_defaults(

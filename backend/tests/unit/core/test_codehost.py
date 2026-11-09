@@ -191,10 +191,10 @@ async def test_assignee_filter_ignores_case() -> None:
 async def test_pull_request_filters() -> None:
     host = FakeCodeHost()
     host.add_pull_request(REPO, author="franck")
-    host.add_pull_request(REPO, author="kevin", state=PullRequestState.CLOSED)
+    host.add_pull_request(REPO, author="annie", state=PullRequestState.CLOSED)
     assert len(await host.list_pull_requests(REPO, PullRequestQuery())) == 1
     assert len(await host.list_pull_requests(REPO, PullRequestQuery(state="closed"))) == 1
-    query = PullRequestQuery(state="all", author="KEVIN")
+    query = PullRequestQuery(state="all", author="ANNIE")
     assert len(await host.list_pull_requests(REPO, query)) == 1
 
 

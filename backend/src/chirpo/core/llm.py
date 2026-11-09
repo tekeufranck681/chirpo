@@ -6,6 +6,7 @@ reveal, so the text can't close the block and pose as instructions.
 """
 
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
@@ -41,12 +42,21 @@ def system_prompt() -> str:
     return template.replace("{actions}", tools).strip()
 
 
-def interpret_request(text: str, sender: str, *, marker: str | None = None) -> InterpretRequest:
+def interpret_request(
+    text: str,
+    sender: str,
+    *,
+    context: Sequence[tuple[str, str]] = (),
+    marker: str | None = None,
+) -> InterpretRequest:
+    """`context`: (kind, body) blocks from `core.context`, each wrapped like the message."""
     marker = marker or secrets.token_hex(8)
     body = f"From: {_sender(sender)}\n{_clip(text)}"
+    blocks = [_untrusted(kind, content, marker) for kind, content in context]
+    blocks.append(_untrusted("chat_message", body, marker))
     return InterpretRequest(
         instructions=f"{system_prompt()}\n\nThis request's marker is `{marker}`.",
-        message=_untrusted("chat_message", body, marker),
+        message="\n\n".join(blocks),
         tools=tool_specs(),
     )
 
