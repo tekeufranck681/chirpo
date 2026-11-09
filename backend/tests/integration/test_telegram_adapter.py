@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
@@ -11,7 +12,7 @@ import respx
 from telegram import Bot
 
 from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
-from chirpo.core.domain import ChatRef, InboundCallback, InboundMessage, SentMessage
+from chirpo.core.domain import ChatRef, ChatUser, InboundCallback, InboundMessage, SentMessage
 from chirpo.core.errors import (
     MessagingError,
     MessagingForbiddenError,
@@ -324,3 +325,39 @@ async def test_delete_webhook_and_info(adapter: TelegramAdapter, api: respx.Mock
     )
     await adapter.delete_webhook()
     assert (await adapter.webhook_info())["pending_update_count"] == 3
+
+
+@pytest.mark.parametrize(
+    ("status", "is_admin"),
+    [("creator", True), ("administrator", True), ("member", False), ("left", False)],
+)
+async def test_group_admins_are_read_from_telegram(
+    adapter: TelegramAdapter, api: respx.MockRouter, status: str, is_admin: bool
+) -> None:
+    user = {"id": 42, "is_bot": False, "first_name": "Franck"}
+    member = {"status": status, "user": user}
+    if status == "administrator":
+        member |= {
+            "can_be_edited": False,
+            "is_anonymous": False,
+            "can_manage_chat": True,
+            "can_delete_messages": True,
+            "can_manage_video_chats": True,
+            "can_restrict_members": True,
+            "can_promote_members": False,
+            "can_change_info": True,
+            "can_invite_users": True,
+            "can_post_stories": False,
+            "can_edit_stories": False,
+            "can_delete_stories": False,
+        }
+    if status == "creator":
+        member |= {"is_anonymous": False}
+    route = api.post("/getChatMember").respond(json={"ok": True, "result": member})
+    sender = ChatUser(platform="telegram", user_id="42", display_name="Franck")
+
+    assert await adapter.is_chat_admin(GROUP, sender) is is_admin
+    assert dict(parse_qsl(route.calls.last.request.content.decode())) == {
+        "chat_id": "-1001234567890",
+        "user_id": "42",
+    }

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chirpo.core.domain import AuditResult, ChatRef, ChatUser, RepoRef
+from chirpo.core.errors import LastAdminError
 from chirpo.core.permissions import Role
 from chirpo.core.ports import AuditLog, Members, Workspaces
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount
@@ -30,7 +31,8 @@ class Stores:
 @pytest.fixture(params=["fake", "postgres"])
 def stores(request: pytest.FixtureRequest) -> Iterator[Stores]:
     if request.param == "fake":
-        yield Stores(FakeWorkspaces(), FakeMembers(), FakeAuditLog())
+        members = FakeMembers()
+        yield Stores(FakeWorkspaces(members), members, FakeAuditLog())
         return
     engine: AsyncEngine = request.getfixturevalue("engine")
     sessions = create_session_factory(engine)
@@ -238,6 +240,73 @@ async def test_one_account_claimed_twice_at_once_ends_with_one_member(stores: St
 
     owners = [m for m in await stores.members.all(workspace.id) if m.codehost == GITHUB_FRANCK]
     assert len(owners) == 1
+
+
+# ------------------------------------------------------------------ first admin, last admin
+
+
+async def test_the_first_link_makes_its_linker_admin(stores: Stores) -> None:
+    workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
+    franck = await stores.members.for_chat_user(workspace.id, chat_user("11"))
+    kevin = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+
+    first = await stores.workspaces.link_repo(workspace.id, repo("acme/a"), first_admin=franck.id)
+    late = await stores.workspaces.link_repo(workspace.id, repo("acme/b"), first_admin=kevin.id)
+
+    assert first is not None and first.is_default
+    assert late is None  # not first any more: nothing linked, nobody promoted
+    roles = {m.id: m.role for m in await stores.members.all(workspace.id)}
+    assert roles == {franck.id: Role.ADMIN, kevin.id: Role.MEMBER}
+    assert len(await stores.workspaces.repos(workspace.id)) == 1
+
+
+async def test_simultaneous_first_links_make_one_admin(stores: Stores) -> None:
+    workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
+    people = [
+        await stores.members.for_chat_user(workspace.id, chat_user(str(n), f"P{n}"))
+        for n in range(4)
+    ]
+    results = await asyncio.gather(
+        *(
+            stores.workspaces.link_repo(workspace.id, repo(f"acme/r{n}"), first_admin=p.id)
+            for n, p in enumerate(people)
+        )
+    )
+    assert sum(result is not None for result in results) == 1
+    admins = [m for m in await stores.members.all(workspace.id) if m.role == Role.ADMIN]
+    assert len(admins) == 1
+
+
+async def test_the_last_admin_cannot_be_demoted(stores: Stores) -> None:
+    workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
+    franck = await stores.members.for_chat_user(workspace.id, chat_user("11"))
+    kevin = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+    await stores.members.set_role(workspace.id, franck.id, Role.ADMIN)
+
+    with pytest.raises(LastAdminError):
+        await stores.members.set_role(workspace.id, franck.id, Role.MEMBER)
+
+    await stores.members.set_role(workspace.id, kevin.id, Role.ADMIN)
+    demoted = await stores.members.set_role(workspace.id, franck.id, Role.MAINTAINER)
+    assert demoted is not None and demoted.role == Role.MAINTAINER
+
+
+async def test_two_admins_demoting_each_other_keep_one(stores: Stores) -> None:
+    workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Shop")
+    a = await stores.members.for_chat_user(workspace.id, chat_user("11"))
+    b = await stores.members.for_chat_user(workspace.id, chat_user("22", "Kevin"))
+    for member in (a, b):
+        await stores.members.set_role(workspace.id, member.id, Role.ADMIN)
+
+    results = await asyncio.gather(
+        stores.members.set_role(workspace.id, a.id, Role.MEMBER),
+        stores.members.set_role(workspace.id, b.id, Role.MEMBER),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, LastAdminError) for result in results) == 1
+    admins = [m for m in await stores.members.all(workspace.id) if m.role == Role.ADMIN]
+    assert len(admins) == 1
 
 
 # ------------------------------------------------------------------ audit

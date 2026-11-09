@@ -39,6 +39,7 @@ class Action(StrEnum):
     LINK_REPO = "link_repo"
     UNLINK_REPO = "unlink_repo"
     CHANGE_ROLE = "change_role"
+    LIST_MEMBERS = "list_members"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,7 @@ REQUIREMENTS: Mapping[Action, Requirement] = {
     Action.LINK_REPO: Requirement(Role.ADMIN, RepoPermission.WRITE),
     Action.UNLINK_REPO: Requirement(Role.ADMIN, None),
     Action.CHANGE_ROLE: Requirement(Role.ADMIN, None),
+    Action.LIST_MEMBERS: Requirement(Role.MEMBER, None),
 }
 
 

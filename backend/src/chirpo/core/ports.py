@@ -48,6 +48,10 @@ class MessagingAdapter(Protocol):
         """A link that opens a private chat with the bot (it may not message people first)."""
         ...
 
+    async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
+        """Whether the user runs this group (its creator or an administrator)."""
+        ...
+
     async def aclose(self) -> None: ...
 
 
@@ -130,9 +134,18 @@ class Workspaces(Protocol):
         ...
 
     async def link_repo(
-        self, workspace_id: UUID, repo: RepoRef, *, installation_id: int | None = None
-    ) -> LinkedRepo:
-        """The first linked repo becomes the default. Linking again returns the existing link."""
+        self,
+        workspace_id: UUID,
+        repo: RepoRef,
+        *,
+        installation_id: int | None = None,
+        first_admin: UUID | None = None,
+    ) -> LinkedRepo | None:
+        """The first linked repo becomes the default. Linking again returns the existing link.
+
+        With `first_admin`, the link is made only if the workspace has no repo yet, and that member
+        becomes admin in the same step; None means another repo got there first.
+        """
         ...
 
     async def unlink_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
@@ -147,7 +160,9 @@ class Members(Protocol):
 
     async def all(self, workspace_id: UUID) -> list[Member]: ...
 
-    async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None: ...
+    async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None:
+        """None if no such member. Raises LastAdminError rather than leave no admin."""
+        ...
 
     async def link_codehost(
         self, workspace_id: UUID, member_id: UUID, account: CodeHostAccount

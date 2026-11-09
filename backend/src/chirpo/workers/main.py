@@ -2,10 +2,15 @@ from typing import Any, ClassVar
 
 from arq import cron, func
 
+from chirpo.adapters.codehost.github.adapter import GitHubAdapter
+from chirpo.adapters.codehost.github.auth import GitHubAuth
 from chirpo.adapters.codehost.github.device import GitHubDeviceLogin
 from chirpo.adapters.messaging.connect import connect_messaging
 from chirpo.config import Settings, get_settings
+from chirpo.core.commands import Services
+from chirpo.core.errors import CodeHostError
 from chirpo.core.identity import IdentityLinking
+from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
 from chirpo.db.repositories import SqlAuditLog, SqlMembers, SqlProcessedEvents, SqlWorkspaces
@@ -35,12 +40,13 @@ async def handle_update(ctx: dict[str, Any], platform: str, raw: dict[str, Any])
         if event is None:
             return
         with bound_context(event_id=event.event_id):
-            handled = await process(event, messaging, ctx["processed"], ctx.get("identity"))
+            handled = await process(event, messaging, ctx["processed"], ctx.get("services"))
             log.info("update_handled" if handled else "duplicate_update_skipped")
 
 
 async def check_device_login(ctx: dict[str, Any], sealed: str) -> None:
-    identity: IdentityLinking | None = ctx.get("identity")
+    services: Services | None = ctx.get("services")
+    identity = services.identity if services else None
     with bound_context(job_id=ctx.get("job_id")):
         if identity is None:
             log.warning("device_login_not_configured")
@@ -66,26 +72,59 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = create_engine(settings)
     ctx["processed"] = SqlProcessedEvents(create_session_factory(ctx["engine"]))
     ctx["encryptor"] = Encryptor(settings.encryption_keys)
-    ctx["identity"] = _identity_linking(ctx, settings)
+    ctx["services"] = await _services(ctx, settings)
+    services = ctx["services"]
     log.info(
         "worker_started",
         platforms=sorted(ctx["messaging"]),
-        github_login=ctx["identity"] is not None,
+        github=services is not None,
+        github_login=bool(services and services.identity),
     )
 
 
-def _identity_linking(ctx: dict[str, Any], settings: Settings) -> IdentityLinking | None:
-    if settings.github_app_client_id is None:
+async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
+    """Everything that acts on GitHub; None (commands explain it) when GitHub isn't configured."""
+    auth = GitHubAuth.from_settings(settings)
+    if auth is None:
         return None
     sessions = create_session_factory(ctx["engine"])
-    ctx["device_login"] = GitHubDeviceLogin(settings.github_app_client_id)
-    return IdentityLinking(
-        login=ctx["device_login"],
-        workspaces=SqlWorkspaces(sessions),
-        members=SqlMembers(sessions),
-        audit=SqlAuditLog(sessions),
-        jobs=ArqLoginJobs(ctx["redis"], ctx["encryptor"]),
+    workspaces, members, audit = (
+        SqlWorkspaces(sessions),
+        SqlMembers(sessions),
+        SqlAuditLog(sessions),
     )
+    codehost = GitHubAdapter(auth)
+    identity = None
+    if settings.github_app_client_id:
+        ctx["device_login"] = GitHubDeviceLogin(settings.github_app_client_id)
+        identity = IdentityLinking(
+            login=ctx["device_login"],
+            workspaces=workspaces,
+            members=members,
+            audit=audit,
+            jobs=ArqLoginJobs(ctx["redis"], ctx["encryptor"]),
+        )
+    return Services(
+        workspaces=workspaces,
+        members=members,
+        audit=audit,
+        codehost=codehost,
+        permissions=PermissionChecker(codehost),
+        identity=identity,
+        app_install_url=await _app_install_url(auth),
+    )
+
+
+async def _app_install_url(auth: GitHubAuth) -> str | None:
+    """Where admins install the App on more repos; looked up once, optional."""
+    if not auth.is_app:
+        return None
+    try:
+        identity = await auth.whoami()
+    except CodeHostError:
+        log.warning("github_app_lookup_failed")
+        return None
+    return f"https://github.com/apps/{identity.name}/installations/new"
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:

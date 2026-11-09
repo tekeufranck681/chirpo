@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic import SecretStr
@@ -99,13 +100,17 @@ class RecordingIdentity:
 async def test_the_worker_job_runs_the_check() -> None:
     encryptor = Encryptor([generate_key()])
     identity = RecordingIdentity()
-    ctx = {"identity": identity, "encryptor": encryptor, "messaging": {"fake": FakeMessaging()}}
+    ctx = {
+        "services": SimpleNamespace(identity=identity),
+        "encryptor": encryptor,
+        "messaging": {"fake": FakeMessaging()},
+    }
     await check_device_login(ctx, seal_pending_login(encryptor, PENDING))
     assert identity.checked == [PENDING]
 
 
 async def test_the_worker_job_is_quiet_without_github_login() -> None:
-    await check_device_login({"identity": None}, "sealed")
+    await check_device_login({"services": None}, "sealed")
 
 
 def test_the_job_is_never_retried_and_keeps_no_result() -> None:

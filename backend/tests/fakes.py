@@ -30,10 +30,12 @@ from chirpo.core.domain import (
 )
 from chirpo.core.errors import (
     CodeHostConflictError,
+    CodeHostForbiddenError,
     CodeHostNotFoundError,
+    LastAdminError,
     MessagingForbiddenError,
 )
-from chirpo.core.permissions import Role
+from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
 CHAT = ChatRef(platform="fake", chat_id="-100")
@@ -65,6 +67,7 @@ class FakeMessaging:
         self.sent: list[tuple[ChatRef, str, str | None]] = []
         self.edited: list[tuple[SentMessage, str]] = []
         self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
+        self.chat_admins: set[str] = set()  # user ids that run the group
 
     def parse_update(self, raw: Mapping[str, Any]) -> InboundEvent | None:
         return None
@@ -85,6 +88,9 @@ class FakeMessaging:
 
     def private_chat_link(self) -> str:
         return "https://chat.example/chirpo?start=iam"
+
+    async def is_chat_admin(self, chat: ChatRef, user: ChatUser) -> bool:
+        return user.user_id in self.chat_admins
 
     async def aclose(self) -> None:
         pass
@@ -126,6 +132,7 @@ class FakeCodeHost:
         self.labels: dict[str, set[str]] = {}
         self.users: set[str] = {"franck"}
         self.logins: dict[str, str] = {}  # account id -> current login
+        self.not_installed: set[str] = set()  # repo keys the App can't reach
         self.default_branch = "main"
         self.permissions: dict[tuple[str, str], RepoPermission] = {}
         self._last_number: dict[str, int] = {}
@@ -223,6 +230,8 @@ class FakeCodeHost:
         return any(same_login(username, user) for user in self.users)
 
     async def current_login(self, repo: RepoRef, user_id: str) -> str | None:
+        if repo.key in self.not_installed:
+            raise CodeHostForbiddenError(f"The GitHub App is not installed on {repo.full_name}")
         return self.logins.get(user_id)
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission:
@@ -273,9 +282,10 @@ class FakeCodeHost:
 class FakeWorkspaces:
     """In-memory Workspaces with the SQL semantics (case-insensitive repos, one default)."""
 
-    def __init__(self) -> None:
+    def __init__(self, members: "FakeMembers | None" = None) -> None:
         self.by_chat: dict[tuple[str, str], Workspace] = {}
         self.links: dict[UUID, list[LinkedRepo]] = {}
+        self.members = members  # to promote the first linker, like the SQL transaction does
 
     async def for_chat(self, chat: ChatRef) -> Workspace | None:
         return self.by_chat.get((chat.platform, chat.chat_id))
@@ -290,9 +300,19 @@ class FakeWorkspaces:
         return sorted(links, key=lambda link: not link.is_default)
 
     async def link_repo(
-        self, workspace_id: UUID, repo: RepoRef, *, installation_id: int | None = None
-    ) -> LinkedRepo:
+        self,
+        workspace_id: UUID,
+        repo: RepoRef,
+        *,
+        installation_id: int | None = None,
+        first_admin: UUID | None = None,
+    ) -> LinkedRepo | None:
         links = self.links.setdefault(workspace_id, [])
+        if first_admin is not None:
+            if links:
+                return None
+            if self.members is not None:
+                await self.members.set_role(workspace_id, first_admin, Role.ADMIN)
         for index, link in enumerate(links):
             if link.repo.key == repo.key:
                 if installation_id is not None:
@@ -340,6 +360,12 @@ class FakeMembers:
         return [member for member in self.members.values() if member.workspace_id == workspace_id]
 
     async def set_role(self, workspace_id: UUID, member_id: UUID, role: Role) -> Member | None:
+        target = self._get(workspace_id, member_id)
+        if target is None:
+            return None
+        admins = sum(m.role == Role.ADMIN for m in await self.all(workspace_id))
+        if role_change_refusal(target, role, admins):
+            raise LastAdminError
         return self._update(workspace_id, member_id, role=role)
 
     async def link_codehost(
