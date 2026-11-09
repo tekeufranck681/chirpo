@@ -85,3 +85,30 @@ async def test_worker_runs_without_telegram_configured() -> None:
     from chirpo.security import generate_key
 
     assert await connect_messaging(Settings(_env_file=None, encryption_key=generate_key())) == {}
+
+
+def test_the_buffer_is_pruned_every_hour() -> None:
+    from chirpo.workers.main import prune_message_buffer
+
+    [job] = [job for job in WorkerSettings.cron_jobs if job.coroutine is prune_message_buffer]
+    assert job.minute == 7
+    assert job.hour is None
+
+
+async def test_pruning_the_buffer() -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from chirpo.workers.main import prune_message_buffer
+    from tests.fakes import FakeMessageBuffer
+
+    buffer = FakeMessageBuffer(timedelta(hours=1))
+    old = make_message("old", sent_at=datetime.now(UTC) - timedelta(hours=2))
+    await buffer.remember(uuid4(), old)
+    assert await prune_message_buffer({"buffer": buffer}) == 1
+
+
+async def test_pruning_without_a_buffer_does_nothing() -> None:
+    from chirpo.workers.main import prune_message_buffer
+
+    assert await prune_message_buffer({}) == 0

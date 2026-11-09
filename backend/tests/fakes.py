@@ -1,6 +1,6 @@
 """Fake adapters for testing the core without network calls."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,6 +23,7 @@ from chirpo.core.domain import (
     PullRequest,
     PullRequestQuery,
     PullRequestState,
+    RecentMessage,
     RepoPermission,
     RepoRef,
     SentMessage,
@@ -35,6 +36,7 @@ from chirpo.core.errors import (
     LastAdminError,
     MessagingForbiddenError,
 )
+from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -106,6 +108,78 @@ class FakeProcessedEvents:
             return False
         self.claimed.add(key)
         return True
+
+
+class FakeMessageBuffer:
+    """Behaves like SqlMessageBuffer: same keys, date clamping, ordering and retention rules."""
+
+    def __init__(
+        self, retention: timedelta, now: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> None:
+        self.retention = retention
+        self._now = now
+        # (received_at, message) per chat and topic, in arrival order.
+        self._kept: dict[
+            tuple[UUID, str, str, str | None], list[tuple[datetime, RecentMessage]]
+        ] = {}
+
+    @staticmethod
+    def _key(workspace_id: UUID, chat: ChatRef) -> tuple[UUID, str, str, str | None]:
+        return (workspace_id, chat.platform, chat.chat_id, chat.thread_id)
+
+    async def remember(self, workspace_id: UUID, message: InboundMessage) -> None:
+        entries = self._kept.setdefault(self._key(workspace_id, message.chat), [])
+        if any(entry.message_id == message.message_id for _, entry in entries):
+            return
+        now = self._now()
+        entries.append(
+            (
+                now,
+                RecentMessage(
+                    message_id=message.message_id,
+                    reply_to_message_id=message.reply_to_message_id,
+                    sender=message.sender,
+                    text=message.text[:MAX_MESSAGE_CHARS],
+                    sent_at=min(message.sent_at, now),
+                ),
+            )
+        )
+
+    async def recent(
+        self, workspace_id: UUID, chat: ChatRef, *, limit: int = 20
+    ) -> list[RecentMessage]:
+        if limit <= 0:
+            return []
+        fresh = [
+            (entry.sent_at, received, entry)
+            for received, entry in self._kept.get(self._key(workspace_id, chat), [])
+            if self._fresh(received, entry)
+        ]
+        fresh.sort(key=lambda item: (item[0], item[1]))
+        return [entry for _, _, entry in fresh[-limit:]]
+
+    async def prune(self) -> int:
+        removed = 0
+        for key, entries in list(self._kept.items()):
+            fresh = [
+                (received, entry) for received, entry in entries if self._fresh(received, entry)
+            ]
+            removed += len(entries) - len(fresh)
+            self._kept[key] = fresh
+        return removed
+
+    async def forget(self, workspace_id: UUID) -> int:
+        removed = 0
+        for key in [key for key in self._kept if key[0] == workspace_id]:
+            removed += len(self._kept.pop(key))
+        return removed
+
+    def _fresh(self, received: datetime, entry: RecentMessage) -> bool:
+        cutoff = self._now() - self.retention
+        return entry.sent_at >= cutoff and received >= cutoff
+
+    def everything(self) -> list[RecentMessage]:
+        return [entry for entries in self._kept.values() for _, entry in entries]
 
 
 class FakePollCursors:
@@ -331,6 +405,11 @@ class FakeWorkspaces:
                     links[0] = links[0].model_copy(update={"is_default": True})
                 return True
         return False
+
+    async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None:
+        for key, workspace in self.by_chat.items():
+            if workspace.id == workspace_id:
+                self.by_chat[key] = workspace.model_copy(update={"keeps_context": keep})
 
 
 class FakeMembers:

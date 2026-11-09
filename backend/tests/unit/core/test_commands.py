@@ -1,5 +1,8 @@
 """The chat commands end to end against fakes: who may do what, what they see, what is audited."""
 
+from dataclasses import replace
+from datetime import timedelta
+
 import pytest
 
 from chirpo.core import messages
@@ -15,6 +18,7 @@ from tests.fakes import (
     FakeAuditLog,
     FakeCodeHost,
     FakeMembers,
+    FakeMessageBuffer,
     FakeMessaging,
     FakeWorkspaces,
     make_message,
@@ -37,6 +41,7 @@ class World:
         self.codehost.logins = {"42": "paul-gh", "77": "kevin-gh"}
         self.messaging = FakeMessaging()
         self.messaging.chat_admins = {USER.user_id}  # Paul runs the Telegram group
+        self.buffer = FakeMessageBuffer(timedelta(hours=24))
         self.services = Services(
             workspaces=self.workspaces,
             members=self.members,
@@ -44,6 +49,8 @@ class World:
             codehost=self.codehost,
             permissions=PermissionChecker(self.codehost),
             app_install_url="https://github.com/apps/chirpo-dev/installations/new",
+            buffer=self.buffer,
+            context_hours=24,
         )
 
     async def say(self, text: str, sender: ChatUser = USER) -> str:
@@ -94,6 +101,7 @@ async def test_the_first_link_makes_a_default_repo_and_an_admin(world: World) ->
         messages.LINKED.format(repo=SANDBOX.full_name)
         + messages.LINKED_DEFAULT
         + messages.LINKED_ADMIN
+        + messages.CONTEXT_NOTICE.format(hours=24)
     )
     (link,) = await world.workspaces.repos(paul.workspace_id)
     assert (link.repo, link.is_default) == (SANDBOX, True)
@@ -396,3 +404,60 @@ async def test_help_lists_every_command(world: World) -> None:
     for name in COMMANDS:
         if name != "start":
             assert f"/{name}" in messages.HELP
+
+
+# ------------------------------------------------------------------ /context
+
+
+async def test_context_status_for_anyone(world: World) -> None:
+    await linked_by_paul(world)
+    await world.verified(KEVIN, KEVIN_GITHUB)
+    assert await world.say("/context", KEVIN) == messages.CONTEXT_IS_ON.format(hours=24)
+
+
+async def test_admins_turn_context_off_and_what_was_kept_is_deleted(world: World) -> None:
+    await linked_by_paul(world)
+    workspace = await world.workspaces.for_chat(CHAT)
+    assert workspace is not None
+    await world.buffer.remember(workspace.id, make_message("checkout crashes", message_id="99"))
+
+    assert await world.say("/context off") == messages.CONTEXT_TURNED_OFF
+    assert await world.buffer.recent(workspace.id, CHAT) == []
+    assert await world.say("/context") == messages.CONTEXT_IS_OFF
+    assert world.audited() == [("change_settings", AuditResult.EXECUTED, None)]
+    assert world.audit.entries[0].payload == {"keep_context": False}
+
+    assert await world.say("/context on") == messages.CONTEXT_TURNED_ON.format(hours=24)
+    assert (await world.workspaces.for_chat(CHAT)).keeps_context  # type: ignore[union-attr]
+
+
+async def test_members_cannot_change_context(world: World) -> None:
+    await linked_by_paul(world)
+    await world.verified(KEVIN, KEVIN_GITHUB)
+    assert await world.say("/context off", KEVIN) == messages.ROLE_TOO_LOW.format(role="admin")
+    assert (await world.workspaces.for_chat(CHAT)).keeps_context  # type: ignore[union-attr]
+
+
+async def test_context_usage(world: World) -> None:
+    await linked_by_paul(world)
+    assert await world.say("/context maybe") == messages.CONTEXT_USAGE
+
+
+async def test_context_when_the_instance_keeps_nothing(world: World) -> None:
+    world.services = replace(world.services, buffer=None, context_hours=0)
+    await linked_by_paul(world)
+    assert await world.say("/context") == messages.CONTEXT_OFF_FOR_INSTANCE
+    assert await world.say("/context on") == messages.CONTEXT_OFF_FOR_INSTANCE
+
+
+async def test_no_notice_on_link_when_the_instance_keeps_nothing(world: World) -> None:
+    world.services = replace(world.services, buffer=None, context_hours=0)
+    await world.verified()
+    world.github_access("paul-gh", SANDBOX, RepoPermission.WRITE)
+    reply = await world.say("/link tekeufranck681/chirpo-sandbox")
+    assert "/context" not in reply
+
+
+async def test_help_and_about_mention_context() -> None:
+    assert "/context" in messages.HELP
+    assert "/context" in messages.ABOUT

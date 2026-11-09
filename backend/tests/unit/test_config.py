@@ -116,3 +116,11 @@ def test_validation_errors_do_not_echo_secret_input() -> None:
     with pytest.raises(ValidationError) as error:
         make_settings(database_url="postgresql://user:HUNTER2@db/chirpo")
     assert "HUNTER2" not in str(error.value)
+
+
+def test_message_buffer_keeps_a_day_by_default_and_can_be_off() -> None:
+    assert make_settings().message_buffer_hours == 24
+    assert make_settings(message_buffer_hours=0).message_buffer_hours == 0
+    for hours in (-1, 24 * 31):
+        with pytest.raises(ValidationError):
+            make_settings(message_buffer_hours=hours)

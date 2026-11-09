@@ -51,6 +51,8 @@ async def link(request: Request) -> None:
         text += messages.LINKED_DEFAULT
     if first:
         text += messages.LINKED_ADMIN
+        if actor.services.buffer is not None and actor.workspace.keeps_context:
+            text += messages.CONTEXT_NOTICE.format(hours=actor.services.context_hours)
     await request.reply(text)
 
 
@@ -77,6 +79,35 @@ async def unlink(request: Request) -> None:
         return
     await audit(actor, Action.UNLINK_REPO, AuditResult.EXECUTED, {"repo": repo.full_name})
     await request.reply(messages.UNLINKED.format(repo=repo.full_name))
+
+
+async def context(request: Request) -> None:
+    """Whether the chat's recent messages are kept for the LLM (D46); admins turn it on or off."""
+    choice = request.args.strip().lower()
+    if choice not in ("", "on", "off"):
+        await request.reply(messages.CONTEXT_USAGE)
+        return
+    actor = await find_actor(request, no_workspace=messages.NO_REPO_LINKED)
+    if actor is None:
+        return
+    services, workspace = actor.services, actor.workspace
+    if services.buffer is None:
+        await request.reply(messages.CONTEXT_OFF_FOR_INSTANCE)
+        return
+    if not choice:
+        on = workspace.keeps_context
+        text = messages.CONTEXT_IS_ON if on else messages.CONTEXT_IS_OFF
+        await request.reply(text.format(hours=services.context_hours))
+        return
+    if not await allowed(request, actor, Action.CHANGE_SETTINGS):
+        return
+    keep = choice == "on"
+    await services.workspaces.set_keeps_context(workspace.id, keep=keep)
+    if not keep:
+        await services.buffer.forget(workspace.id)
+    await audit(actor, Action.CHANGE_SETTINGS, AuditResult.EXECUTED, {"keep_context": keep})
+    text = messages.CONTEXT_TURNED_ON if keep else messages.CONTEXT_TURNED_OFF
+    await request.reply(text.format(hours=services.context_hours))
 
 
 async def members(request: Request) -> None:

@@ -15,6 +15,7 @@ Commands:
 /members - who's here, their role and GitHub account
 /role @name admin|maintainer|member - change someone's role (admins)
 /unlink owner/repo - disconnect a repo (admins)
+/context on|off - keep recent messages so I understand follow-ups (admins)
 
 Soon you'll be able to just mention me:
 "@chirpo checkout crashes on Android, give it to Franck"."""
@@ -25,7 +26,10 @@ NOT_UNDERSTOOD_YET = "I can't understand free text yet. For now try /ping or /he
 
 ABOUT = """chirpo: manage your GitHub from your team chat, in plain language.
 Open source, created by Tekeu Franck.
-https://github.com/tekeufranck681/chirpo"""
+https://github.com/tekeufranck681/chirpo
+
+In linked chats I keep recent messages for a limited time, encrypted, so I understand follow-ups
+like "assign it to Franck". See /context."""
 
 IAM_CODE = """{name}, let's link your GitHub account.
 
@@ -91,6 +95,19 @@ LINK_USAGE = "Tell me which repo: /link owner/repo"
 LINKED = "Linked {repo}."
 LINKED_DEFAULT = " It's the default repo for /issue."
 LINKED_ADMIN = " You're the admin of this chat's workspace."
+CONTEXT_NOTICE = (
+    "\n\nI keep this chat's messages for {hours} hours, encrypted, so I understand follow-ups "
+    'like "assign it to Kevin". An admin can turn this off with /context off.'
+)
+CONTEXT_IS_ON = (
+    "I keep this chat's messages for {hours} hours as context. "
+    "An admin can turn it off with /context off."
+)
+CONTEXT_IS_OFF = "I don't keep this chat's messages. An admin can turn context on with /context on."
+CONTEXT_TURNED_ON = "Done: I'll keep this chat's messages for {hours} hours as context."
+CONTEXT_TURNED_OFF = "Done: I no longer keep this chat's messages, and deleted the ones I had."
+CONTEXT_OFF_FOR_INSTANCE = "This chirpo keeps no messages: its operator turned context off."
+CONTEXT_USAGE = "Usage: /context on or /context off (admins). /context alone shows the setting."
 ALREADY_LINKED = "{repo} is already linked here."
 
 UNLINK_USAGE = "Tell me which repo: /unlink owner/repo"

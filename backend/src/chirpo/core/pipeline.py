@@ -39,4 +39,18 @@ async def process(
     if not await processed.claim(messaging.event_source, event.event_id):
         return False
     await handle_inbound(event, messaging, services)
+    # After handling: a buffer failure can't cost the command, and a request never reads itself.
+    await _remember(event, services)
     return True
+
+
+async def _remember(event: InboundEvent, services: Services | None) -> None:
+    """Keeps plain messages from linked chats as context for later requests (D46)."""
+    buffer = services.buffer if services else None
+    if buffer is None or services is None or not isinstance(event, InboundMessage):
+        return
+    if event.sender.is_bot or not event.text or event.text.startswith("/"):
+        return  # commands, known or not, are no context
+    workspace = await services.workspaces.for_chat(event.chat)
+    if workspace is not None and workspace.keeps_context:
+        await buffer.remember(workspace.id, event)

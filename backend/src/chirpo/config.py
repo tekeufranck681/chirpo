@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     llm_api_key: SecretStr | None = None
 
+    # Recent chat messages kept (encrypted) as context for the LLM; 0 keeps none (D46).
+    message_buffer_hours: int = Field(default=24, ge=0, le=24 * 30)
+
     @field_validator("database_url")
     @classmethod
     def _async_postgres_driver(cls, value: str) -> str:

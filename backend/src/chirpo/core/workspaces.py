@@ -14,6 +14,7 @@ class Workspace(BaseModel):
 
     id: UUID
     name: str
+    keeps_context: bool = True  # recent messages kept for the LLM (D46); admins turn it off
 
 
 class LinkedRepo(BaseModel):

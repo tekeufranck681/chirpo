@@ -160,6 +160,36 @@ class ProcessedEvent(IdMixin, Base):
     received_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
 
 
+class BufferedMessage(IdMixin, WorkspaceScopedMixin, Base):
+    """A recent chat message kept as context for the LLM; the text is encrypted (D46)."""
+
+    __tablename__ = "message_buffer"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "platform", "chat_id", "message_id"),
+        Index(
+            "ix_message_buffer_workspace_id_chat_sent_at",
+            "workspace_id",
+            "platform",
+            "chat_id",
+            "sent_at",
+        ),
+    )
+
+    platform: Mapped[str] = mapped_column(Text)
+    chat_id: Mapped[str] = mapped_column(Text)
+    thread_id: Mapped[str | None] = mapped_column(Text)  # a forum topic; context stays inside it
+    message_id: Mapped[str] = mapped_column(Text)
+    reply_to_message_id: Mapped[str | None] = mapped_column(Text)
+    sender_id: Mapped[str] = mapped_column(Text)
+    sender_name: Mapped[str] = mapped_column(Text)
+    sender_username: Mapped[str | None] = mapped_column(Text)
+    text_encrypted: Mapped[str] = mapped_column(Text)
+    # sent_at orders messages (never later than received); received_at, set by the database,
+    # bounds how long anything is kept whatever date a platform reports. Both serve pruning.
+    sent_at: Mapped[datetime] = mapped_column(index=True)
+    received_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+
+
 class AuditEvent(IdMixin, Base):
     """Append-only. workspace_id is nullable: requests from unlinked chats are audited too."""
 
