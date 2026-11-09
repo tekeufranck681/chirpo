@@ -130,6 +130,8 @@ def test_llm_try_prints_the_proposals(
             proposals = (CreateIssue(title="Checkout crashes", labels=("bug",)), NotARequest())
             return Interpretation(proposals, "fake-model-001", 1800, 90)
 
+    settings = _unconfigured(monkeypatch)
+    monkeypatch.setattr(chirpo.cli, "get_settings", lambda: settings)
     monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Fake())
     chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "checkout crashes"]))
     out = capsys.readouterr().out
@@ -153,6 +155,8 @@ def test_llm_try_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         async def interpret(self, request: InterpretRequest) -> Interpretation:
             raise LLMRateLimitedError(17)
 
+    settings = _unconfigured(monkeypatch)
+    monkeypatch.setattr(chirpo.cli, "get_settings", lambda: settings)
     monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Limited())
     with pytest.raises(SystemExit, match="rate limited"):
         chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "hi"]))
@@ -191,6 +195,8 @@ def test_llm_try_shows_googles_explanation(monkeypatch: pytest.MonkeyPatch) -> N
         async def interpret(self, request: InterpretRequest) -> Interpretation:
             raise LLMSetupError("Gemini rejected the request (400)", detail='Unknown name "x"')
 
+    settings = _unconfigured(monkeypatch)
+    monkeypatch.setattr(chirpo.cli, "get_settings", lambda: settings)
     monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Rejecting())
     with pytest.raises(SystemExit, match='rejected the request \\(400\\): Unknown name "x"'):
         chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "hi"]))
