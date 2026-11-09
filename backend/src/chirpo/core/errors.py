@@ -67,3 +67,48 @@ class InvalidProposalError(ValueError):
         super().__init__(f"invalid {action!r} proposal: {'; '.join(problems)}")
         self.action = action
         self.problems = problems
+
+
+class LLMError(Exception):
+    """An LLM call failed."""
+
+
+class LLMSetupError(LLMError):
+    """The key, the model or the request is wrong; retrying won't help until the setup is fixed.
+
+    `detail` is the provider's own explanation, kept out of the message: it may quote the request.
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
+
+
+class LLMRateLimitedError(LLMError):
+    def __init__(self, retry_after_seconds: float | None) -> None:
+        super().__init__(
+            f"rate limited, retry after {retry_after_seconds} s"
+            if retry_after_seconds is not None
+            else "rate limited"
+        )
+        self.retry_after_seconds = retry_after_seconds
+
+
+class LLMUnavailableError(LLMError):
+    """Network problem or provider outage; retrying later may succeed."""
+
+
+class LLMRefusedError(LLMError):
+    """The provider's safety filters blocked the message or the answer."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"blocked by the provider: {reason}")
+        self.reason = reason
+
+
+class LLMInvalidOutputError(LLMError):
+    """The answer holds no usable proposal. `problems` never include the model's text."""
+
+    def __init__(self, problems: tuple[str, ...]) -> None:
+        super().__init__(f"unusable answer: {'; '.join(problems)}")
+        self.problems = problems

@@ -32,7 +32,8 @@ _INVISIBLE = frozenset(
 _CONTROL_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})  # control characters, line/paragraph separators
 
 
-def _unsafe(char: str) -> bool:
+def unsafe_char(char: str) -> bool:
+    """Control, bidi or zero-width; tab and newline are fine."""
     if char in "\t\n":
         return False
     return char in _INVISIBLE or unicodedata.category(char) in _CONTROL_CATEGORIES
@@ -40,7 +41,7 @@ def _unsafe(char: str) -> bool:
 
 def _text(value: str) -> str:
     value = value.replace("\r\n", "\n")
-    if any(map(_unsafe, value)):
+    if any(map(unsafe_char, value)):
         raise ValueError("contains control or invisible characters")
     return value
 

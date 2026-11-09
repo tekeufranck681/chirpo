@@ -1,0 +1,19 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {"text": "Moving #12 and assigning the sender.", "thought": true},
+          {"functionCall": {"name": "set_status", "args": {"issue": {"number": 12}, "status": "in progress"}}},
+          {"functionCall": {"name": "assign_issue", "args": {"issue": {"number": 12.0}, "assignees": ["me"]}}}
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {"promptTokenCount": 1840, "candidatesTokenCount": 48, "totalTokenCount": 1888},
+  "modelVersion": "gemini-3.6-flash",
+  "responseId": "b2c3d4e5f6a1"
+}

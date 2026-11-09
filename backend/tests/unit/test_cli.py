@@ -84,3 +84,113 @@ def test_github_demo_command() -> None:
 def test_github_demo_needs_a_repo() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["github", "demo"])
+
+
+def _unconfigured(monkeypatch: pytest.MonkeyPatch, **values: object) -> object:
+    from chirpo.config import Settings
+    from chirpo.security import generate_key
+
+    for name in [name for name in os.environ if name.startswith("CHIRPO_")]:
+        monkeypatch.delenv(name)
+    return Settings(_env_file=None, encryption_key=generate_key(), **values)  # type: ignore[call-arg]
+
+
+def test_llm_try_command() -> None:
+    from chirpo.cli import run_llm
+
+    args = build_parser().parse_args(["llm", "try", "checkout crashes", "--sender", "Paul"])
+    assert (args.handler, args.text, args.sender) == (run_llm, "checkout crashes", "Paul")
+    assert build_parser().parse_args(["llm", "try", "hi"]).sender == "Franck"
+
+
+def test_llm_try_needs_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    import chirpo.cli
+
+    settings = _unconfigured(monkeypatch)
+    monkeypatch.setattr(chirpo.cli, "get_settings", lambda: settings)
+    with pytest.raises(SystemExit, match="CHIRPO_LLM_API_KEY"):
+        chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "hi"]))
+
+
+def test_llm_try_prints_the_proposals(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import chirpo.adapters.llm
+    import chirpo.cli
+    from chirpo.core.actions import CreateIssue, NotARequest
+    from chirpo.core.llm import Interpretation, InterpretRequest
+
+    seen: list[InterpretRequest] = []
+
+    class Fake:
+        model = "fake-model"
+
+        async def interpret(self, request: InterpretRequest) -> Interpretation:
+            seen.append(request)
+            proposals = (CreateIssue(title="Checkout crashes", labels=("bug",)), NotARequest())
+            return Interpretation(proposals, "fake-model-001", 1800, 90)
+
+    monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Fake())
+    chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "checkout crashes"]))
+    out = capsys.readouterr().out
+    assert "From: Franck\ncheckout crashes" in seen[0].message
+    assert "create_issue (needs confirmation, permission triage_issue)" in out
+    assert '"title": "Checkout crashes"' in out
+    assert '"labels": [\n    "bug"\n  ]' in out
+    assert "not_a_request (a reply, nothing on GitHub)" in out
+    assert "fake-model-001: 1800 tokens in, 90 out" in out
+
+
+def test_llm_try_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import chirpo.adapters.llm
+    import chirpo.cli
+    from chirpo.core.errors import LLMRateLimitedError
+    from chirpo.core.llm import Interpretation, InterpretRequest
+
+    class Limited:
+        model = "fake-model"
+
+        async def interpret(self, request: InterpretRequest) -> Interpretation:
+            raise LLMRateLimitedError(17)
+
+    monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Limited())
+    with pytest.raises(SystemExit, match="rate limited"):
+        chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "hi"]))
+
+
+def test_llm_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chirpo.adapters.llm import llm_from_settings
+    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, GeminiProvider
+
+    assert llm_from_settings(_unconfigured(monkeypatch)) is None  # type: ignore[arg-type]
+    provider = llm_from_settings(_unconfigured(monkeypatch, llm_api_key="k"))  # type: ignore[arg-type]
+    assert isinstance(provider, GeminiProvider)
+    assert provider.model == DEFAULT_MODEL
+    chosen = llm_from_settings(
+        _unconfigured(monkeypatch, llm_api_key="k", llm_model="gemini-3.5-flash-lite")  # type: ignore[arg-type]
+    )
+    assert chosen is not None
+    assert chosen.model == "gemini-3.5-flash-lite"
+
+
+def test_a_blank_llm_key_counts_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chirpo.adapters.llm import llm_from_settings
+
+    assert llm_from_settings(_unconfigured(monkeypatch, llm_api_key="  ")) is None  # type: ignore[arg-type]
+
+
+def test_llm_try_shows_googles_explanation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import chirpo.adapters.llm
+    import chirpo.cli
+    from chirpo.core.errors import LLMSetupError
+    from chirpo.core.llm import Interpretation, InterpretRequest
+
+    class Rejecting:
+        model = "fake-model"
+
+        async def interpret(self, request: InterpretRequest) -> Interpretation:
+            raise LLMSetupError("Gemini rejected the request (400)", detail='Unknown name "x"')
+
+    monkeypatch.setattr(chirpo.adapters.llm, "llm_from_settings", lambda _settings: Rejecting())
+    with pytest.raises(SystemExit, match='rejected the request \\(400\\): Unknown name "x"'):
+        chirpo.cli.run_llm(build_parser().parse_args(["llm", "try", "hi"]))

@@ -32,7 +32,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
     )
 
 
-def parse_tool_call(name: str, arguments: Mapping[str, Any] | None) -> Proposal:
+def parse_tool_call(name: object, arguments: Mapping[str, Any] | None) -> Proposal:
     """`arguments` None means the provider sent none, as some do for tools without fields."""
     spec = ACTIONS.get(name) if isinstance(name, str) else None
     if spec is None:
@@ -40,7 +40,7 @@ def parse_tool_call(name: str, arguments: Mapping[str, Any] | None) -> Proposal:
     try:
         return spec.model.model_validate(arguments or {})
     except ValidationError as error:
-        raise InvalidProposalError(name, _problems(error)) from None
+        raise InvalidProposalError(spec.name, _problems(error)) from None
 
 
 def _problems(error: ValidationError) -> tuple[str, ...]:

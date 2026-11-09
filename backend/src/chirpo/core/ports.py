@@ -21,6 +21,7 @@ from chirpo.core.domain import (
     RepoRef,
     SentMessage,
 )
+from chirpo.core.llm import Interpretation, InterpretRequest
 from chirpo.core.permissions import Role
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -174,3 +175,11 @@ class Members(Protocol):
 
 class AuditLog(Protocol):
     async def record(self, entry: AuditEntry) -> None: ...
+
+
+class LLMProvider(Protocol):
+    model: str
+
+    async def interpret(self, request: InterpretRequest) -> Interpretation:
+        """Proposals for the message, validated against the action models. Raises `LLMError`s."""
+        ...
