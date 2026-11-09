@@ -5,7 +5,7 @@ People, issues and repos stay exactly as the message named them ("Kevin", "the c
 "api"): code resolves them against the workspace later, so the model never picks a GitHub account.
 """
 
-import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal, Self
@@ -22,16 +22,25 @@ from pydantic import (
 from chirpo.core.domain import CloseReason
 from chirpo.core.permissions import Action
 
-# Control characters (tab and newline aside), bidi overrides that make text read differently than it
-# is, and zero-width characters that make two names look alike. The zero-width joiner stays: emoji.
-_UNSAFE = re.compile(
-    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b\u200e\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\ufeff]"
+# Bidi overrides make text read differently than it is; zero-width characters make two names look
+# alike. The zero-width joiner stays: emoji need it.
+_INVISIBLE = frozenset(
+    "\u200b\u200e\u200f\ufeff"
+    + "".join(map(chr, range(0x202A, 0x202F)))
+    + "".join(map(chr, range(0x2066, 0x206A)))
 )
+_CONTROL_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})  # control characters, line/paragraph separators
+
+
+def _unsafe(char: str) -> bool:
+    if char in "\t\n":
+        return False
+    return char in _INVISIBLE or unicodedata.category(char) in _CONTROL_CATEGORIES
 
 
 def _text(value: str) -> str:
     value = value.replace("\r\n", "\n")
-    if _UNSAFE.search(value):
+    if any(map(_unsafe, value)):
         raise ValueError("contains control or invisible characters")
     return value
 
