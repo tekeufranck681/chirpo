@@ -180,6 +180,7 @@ class TelegramAdapter:
             replies_to_bot=bool(
                 replied and replied.from_user and replied.from_user.id == self._bot_id
             ),
+            reply_to_message_id=str(replied.message_id) if replied else None,
             is_private_chat=message.chat.type == "private",
         )
 

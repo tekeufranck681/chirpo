@@ -9,7 +9,14 @@ from chirpo.core.domain import AuditResult, InboundMessage, RepoRef
 from chirpo.core.errors import CodeHostForbiddenError
 from chirpo.core.identity import IdentityLinking
 from chirpo.core.permissions import Action, PermissionChecker, Refusal, Verdict
-from chirpo.core.ports import AuditLog, CodeHostAdapter, Members, MessagingAdapter, Workspaces
+from chirpo.core.ports import (
+    AuditLog,
+    CodeHostAdapter,
+    Members,
+    MessageBuffer,
+    MessagingAdapter,
+    Workspaces,
+)
 from chirpo.core.workspaces import AuditEntry, Member, Workspace
 
 
@@ -24,6 +31,8 @@ class Services:
     permissions: PermissionChecker
     identity: IdentityLinking | None = None
     app_install_url: str | None = None
+    buffer: MessageBuffer | None = None  # None: the instance keeps no messages (D46)
+    context_hours: int = 0
 
 
 @dataclass(frozen=True, slots=True)

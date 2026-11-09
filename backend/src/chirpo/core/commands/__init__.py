@@ -19,6 +19,7 @@ COMMANDS: Mapping[str, Handler] = MappingProxyType(
         "members": workspace.members,
         "role": workspace.role,
         "issue": issues.issue,
+        "context": workspace.context,
     }
 )
 

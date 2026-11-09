@@ -336,3 +336,15 @@ async def test_audit_entries_are_recorded(stores: Stores, request: pytest.Fixtur
     assert row is not None
     assert (row.action, row.result, row.payload) == ("create_issue", "executed", entry.payload)
     assert row.actor_member_id == franck.id
+
+
+async def test_context_is_kept_by_default_and_can_be_turned_off(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    assert workspace.keeps_context
+    await stores.workspaces.set_keeps_context(workspace.id, keep=False)
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None
+    assert not found.keeps_context
+    await stores.workspaces.set_keeps_context(workspace.id, keep=True)
+    assert (await stores.workspaces.get_or_create_for_chat(chat, name="Team")).keeps_context

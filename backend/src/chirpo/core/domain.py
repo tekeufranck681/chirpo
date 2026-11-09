@@ -65,7 +65,20 @@ class InboundMessage(BaseModel):
     sent_at: AwareDatetime
     mentions_bot: bool = False
     replies_to_bot: bool = False
+    reply_to_message_id: str | None = None
     is_private_chat: bool = False
+
+
+class RecentMessage(BaseModel):
+    """A message kept in the buffer for context (D46)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    message_id: str
+    reply_to_message_id: str | None = None
+    sender: ChatUser
+    text: str
+    sent_at: AwareDatetime
 
 
 class InboundCallback(BaseModel):

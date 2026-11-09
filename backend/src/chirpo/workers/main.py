@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from arq import cron, func
@@ -13,7 +14,13 @@ from chirpo.core.identity import IdentityLinking
 from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
-from chirpo.db.repositories import SqlAuditLog, SqlMembers, SqlProcessedEvents, SqlWorkspaces
+from chirpo.db.repositories import (
+    SqlAuditLog,
+    SqlMembers,
+    SqlMessageBuffer,
+    SqlProcessedEvents,
+    SqlWorkspaces,
+)
 from chirpo.db.session import create_engine, create_session_factory
 from chirpo.logging import bound_context, configure_logging, get_logger, init_sentry
 from chirpo.security import Encryptor
@@ -64,6 +71,15 @@ async def prune_processed_events(ctx: dict[str, Any]) -> int:
     return deleted
 
 
+async def prune_message_buffer(ctx: dict[str, Any]) -> int:
+    buffer = ctx.get("buffer")
+    if buffer is None:
+        return 0
+    deleted: int = await buffer.prune()
+    log.info("message_buffer_pruned", deleted=deleted)
+    return deleted
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings)
@@ -72,6 +88,12 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = create_engine(settings)
     ctx["processed"] = SqlProcessedEvents(create_session_factory(ctx["engine"]))
     ctx["encryptor"] = Encryptor(settings.encryption_keys)
+    # Built even when off (0 hours): the hourly prune then clears what an earlier setting kept.
+    ctx["buffer"] = SqlMessageBuffer(
+        create_session_factory(ctx["engine"]),
+        ctx["encryptor"],
+        timedelta(hours=settings.message_buffer_hours),
+    )
     ctx["services"] = await _services(ctx, settings)
     services = ctx["services"]
     log.info(
@@ -112,6 +134,8 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         permissions=PermissionChecker(codehost),
         identity=identity,
         app_install_url=await _app_install_url(auth),
+        buffer=ctx["buffer"] if settings.message_buffer_hours else None,
+        context_hours=settings.message_buffer_hours,
     )
 
 
@@ -146,6 +170,9 @@ class WorkerSettings:
         func(check_device_login, max_tries=1, keep_result=0),
     ]
     # Telegram never redelivers updates this old, so their duplicate-check rows can go.
-    cron_jobs: ClassVar[list[Any]] = [cron(prune_processed_events, hour=3, minute=17)]
+    cron_jobs: ClassVar[list[Any]] = [
+        cron(prune_processed_events, hour=3, minute=17),
+        cron(prune_message_buffer, minute=7),  # hourly
+    ]
     on_startup = startup
     on_shutdown = shutdown

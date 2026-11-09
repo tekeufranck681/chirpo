@@ -99,11 +99,14 @@ def test_reply_to_the_bot(adapter: TelegramAdapter) -> None:
     message = parse_message(adapter, "reply_to_bot")
     assert message.replies_to_bot
     assert not message.mentions_bot
+    replied = load("reply_to_bot")["message"]["reply_to_message"]["message_id"]
+    assert message.reply_to_message_id == str(replied)
 
 
 def test_plain_group_message(adapter: TelegramAdapter) -> None:
     message = parse_message(adapter, "plain_group_message")
     assert not (message.mentions_bot or message.replies_to_bot or message.is_private_chat)
+    assert message.reply_to_message_id is None
 
 
 def test_private_chat(adapter: TelegramAdapter) -> None:
@@ -253,6 +256,7 @@ def test_removing_a_mid_sentence_mention_keeps_text_tidy(adapter: TelegramAdapte
 def test_topic_root_is_not_a_reply_to_the_bot(adapter: TelegramAdapter) -> None:
     message = parse_message(adapter, "topic_message_in_bot_topic")
     assert not message.replies_to_bot
+    assert message.reply_to_message_id is None
     assert message.chat.thread_id == "20"
 
 

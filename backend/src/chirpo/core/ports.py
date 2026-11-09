@@ -8,6 +8,7 @@ from chirpo.core.domain import (
     ChatRef,
     ChatUser,
     InboundEvent,
+    InboundMessage,
     Issue,
     IssuePatch,
     IssueQuery,
@@ -17,6 +18,7 @@ from chirpo.core.domain import (
     NewIssue,
     PullRequest,
     PullRequestQuery,
+    RecentMessage,
     RepoPermission,
     RepoRef,
     SentMessage,
@@ -153,6 +155,8 @@ class Workspaces(Protocol):
         """False if it wasn't linked. Unlinking the default promotes the oldest remaining repo."""
         ...
 
+    async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None: ...
+
 
 class Members(Protocol):
     async def for_chat_user(self, workspace_id: UUID, user: ChatUser) -> Member:
@@ -182,4 +186,26 @@ class LLMProvider(Protocol):
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
         """Proposals for the message, validated against the action models. Raises `LLMError`s."""
+        ...
+
+
+class MessageBuffer(Protocol):
+    """Recent chat messages kept for context, encrypted, for a limited time (D46)."""
+
+    async def remember(self, workspace_id: UUID, message: InboundMessage) -> None:
+        """Keep the message; a second delivery of the same message is ignored."""
+        ...
+
+    async def recent(
+        self, workspace_id: UUID, chat: ChatRef, *, limit: int = 20
+    ) -> list[RecentMessage]:
+        """The chat's last `limit` messages still within the retention time, oldest first."""
+        ...
+
+    async def prune(self) -> int:
+        """Delete messages older than the retention time; returns how many."""
+        ...
+
+    async def forget(self, workspace_id: UUID) -> int:
+        """Delete everything kept for the workspace; returns how many."""
         ...

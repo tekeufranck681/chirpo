@@ -1,12 +1,27 @@
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
 from chirpo.core import messages
-from chirpo.core.domain import ChatUser
-from chirpo.core.pipeline import handle_inbound
-from tests.fakes import FakeMessaging, make_callback, make_message
+from chirpo.core.commands import Services
+from chirpo.core.domain import ChatUser, InboundMessage
+from chirpo.core.permissions import PermissionChecker
+from chirpo.core.pipeline import handle_inbound, process
+from tests.fakes import (
+    CHAT,
+    FakeAuditLog,
+    FakeCodeHost,
+    FakeMembers,
+    FakeMessageBuffer,
+    FakeMessaging,
+    FakeProcessedEvents,
+    FakeWorkspaces,
+    make_callback,
+    make_message,
+)
 
 
 async def _replies(**message_fields: object) -> list[str]:
@@ -83,3 +98,104 @@ async def test_process_handles_an_event_once() -> None:
     assert await process(message, messaging, processed) is True
     assert await process(message, messaging, processed) is False
     assert len(messaging.sent) == 1
+
+
+class World:
+    """A linked or unlinked chat, with a buffer, for the remembering tests (D46)."""
+
+    def __init__(self) -> None:
+        members = FakeMembers()
+        codehost = FakeCodeHost()
+        self.workspaces = FakeWorkspaces(members)
+        self.buffer = FakeMessageBuffer(timedelta(hours=24))
+        self.services = Services(
+            workspaces=self.workspaces,
+            members=members,
+            audit=FakeAuditLog(),
+            codehost=codehost,
+            permissions=PermissionChecker(codehost),
+            buffer=self.buffer,
+            context_hours=24,
+        )
+        self.messaging = FakeMessaging()
+        self.processed = FakeProcessedEvents()
+
+    async def send(self, *sent: InboundMessage, buffer: bool = True) -> None:
+        services = self.services if buffer else replace(self.services, buffer=None)
+        for message in sent:
+            await process(message, self.messaging, self.processed, services)
+
+    def kept(self) -> list[str]:
+        return [entry.text for entry in self.buffer.everything()]
+
+
+async def _linked() -> World:
+    world = World()
+    await world.workspaces.get_or_create_for_chat(CHAT, name="Shop")
+    return world
+
+
+class TestRemembering:
+    async def test_plain_messages_in_a_linked_chat(self) -> None:
+        world = await _linked()
+        await world.send(
+            make_message("checkout crashes on Android", event_id="1", message_id="10"),
+            make_message("assign it to Kevin", event_id="2", message_id="11", mentions_bot=True),
+        )
+        assert world.kept() == ["checkout crashes on Android", "assign it to Kevin"]
+
+    async def test_not_in_an_unlinked_chat(self) -> None:
+        world = World()
+        await world.send(make_message("hello"))
+        assert world.kept() == []
+
+    async def test_not_commands(self) -> None:
+        world = await _linked()
+        await world.send(
+            make_message("/iam", event_id="1", message_id="10"),
+            make_message("/ping@chirpo_bot", event_id="2", message_id="11"),
+            make_message("/foo bar", event_id="3", message_id="12"),
+        )
+        assert world.kept() == []
+
+    async def test_not_bots_or_empty_messages(self) -> None:
+        world = await _linked()
+        bot = ChatUser(platform="fake", user_id="9", display_name="CI", is_bot=True)
+        await world.send(
+            make_message("build failed", event_id="1", message_id="10", sender=bot),
+            make_message("", event_id="2", message_id="11"),
+        )
+        assert world.kept() == []
+
+    async def test_a_duplicate_delivery_is_not_remembered_twice(self) -> None:
+        world = await _linked()
+        same = make_message("checkout crashes")
+        await world.send(same, same)
+        assert world.kept() == ["checkout crashes"]
+
+    async def test_without_a_buffer_nothing_is_kept_and_commands_still_work(self) -> None:
+        world = await _linked()
+        await world.send(
+            make_message("/ping"), make_message("hi", event_id="2", mentions_bot=True), buffer=False
+        )
+        assert world.kept() == []
+        assert len(world.messaging.sent) == 2
+
+    async def test_a_failing_buffer_never_costs_the_command(self) -> None:
+        class Broken(FakeMessageBuffer):
+            async def remember(self, workspace_id: UUID, message: InboundMessage) -> None:
+                raise RuntimeError("database down")
+
+        world = await _linked()
+        world.services = replace(world.services, buffer=Broken(timedelta(hours=24)))
+        with pytest.raises(RuntimeError):
+            await world.send(make_message("hi", mentions_bot=True))
+        assert [text for _, text, _ in world.messaging.sent] == [messages.NOT_UNDERSTOOD_YET]
+
+    async def test_not_when_the_team_turned_context_off(self) -> None:
+        world = await _linked()
+        workspace = await world.workspaces.for_chat(CHAT)
+        assert workspace is not None
+        await world.workspaces.set_keeps_context(workspace.id, keep=False)
+        await world.send(make_message("checkout crashes"))
+        assert world.kept() == []

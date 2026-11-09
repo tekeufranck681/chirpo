@@ -1,18 +1,27 @@
 """Implementations of the repository Protocols from core.ports."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from chirpo.core.domain import ChatRef, ChatUser, IdentityKind, RepoRef
+from chirpo.core.domain import (
+    ChatRef,
+    ChatUser,
+    IdentityKind,
+    InboundMessage,
+    RecentMessage,
+    RepoRef,
+)
 from chirpo.core.errors import LastAdminError
+from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 from chirpo.db import models as db
 from chirpo.db.models import PollCursor, ProcessedEvent
+from chirpo.security import DecryptionError, Encryptor
 
 
 class SqlProcessedEvents:
@@ -35,6 +44,106 @@ class SqlProcessedEvents:
         async with self._sessions.begin() as session:
             result = await session.execute(statement)
             return int(result.rowcount)  # type: ignore[attr-defined]
+
+
+KEEP_CONTEXT = "keep_context"  # key in workspaces.settings
+
+
+class SqlMessageBuffer:
+    """Recent chat messages, text encrypted (D46).
+
+    A message is read while both its sent and received times are within the retention, and pruned
+    as soon as either is older: a wrong date from a platform can't keep it around.
+    """
+
+    def __init__(
+        self, sessions: async_sessionmaker[AsyncSession], encryptor: Encryptor, retention: timedelta
+    ) -> None:
+        self._sessions = sessions
+        self._encryptor = encryptor
+        self._retention = retention
+
+    async def remember(self, workspace_id: UUID, message: InboundMessage) -> None:
+        statement = (
+            insert(db.BufferedMessage)
+            .values(
+                workspace_id=workspace_id,
+                platform=message.chat.platform,
+                chat_id=message.chat.chat_id,
+                thread_id=message.chat.thread_id,
+                message_id=message.message_id,
+                reply_to_message_id=message.reply_to_message_id,
+                sender_id=message.sender.user_id,
+                sender_name=message.sender.display_name,
+                sender_username=message.sender.username,
+                text_encrypted=self._encryptor.encrypt(message.text[:MAX_MESSAGE_CHARS]),
+                sent_at=min(message.sent_at, datetime.now(UTC)),
+            )
+            .on_conflict_do_nothing(
+                index_elements=["workspace_id", "platform", "chat_id", "message_id"]
+            )
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def recent(
+        self, workspace_id: UUID, chat: ChatRef, *, limit: int = 20
+    ) -> list[RecentMessage]:
+        if limit <= 0:
+            return []
+        cutoff = func.now() - self._retention
+        statement = (
+            select(db.BufferedMessage)
+            .where(
+                db.BufferedMessage.workspace_id == workspace_id,
+                db.BufferedMessage.platform == chat.platform,
+                db.BufferedMessage.chat_id == chat.chat_id,
+                db.BufferedMessage.thread_id.is_not_distinct_from(chat.thread_id),
+                db.BufferedMessage.sent_at >= cutoff,
+                db.BufferedMessage.received_at >= cutoff,
+            )
+            .order_by(db.BufferedMessage.sent_at.desc(), db.BufferedMessage.received_at.desc())
+            .limit(limit)
+        )
+        async with self._sessions() as session:
+            rows = (await session.execute(statement)).scalars().all()
+        recent = (self._to_recent(row) for row in reversed(rows))
+        return [message for message in recent if message is not None]
+
+    async def prune(self) -> int:
+        cutoff = func.now() - self._retention
+        statement = delete(db.BufferedMessage).where(
+            or_(db.BufferedMessage.sent_at < cutoff, db.BufferedMessage.received_at < cutoff)
+        )
+        async with self._sessions.begin() as session:
+            result = await session.execute(statement)
+            return int(result.rowcount)  # type: ignore[attr-defined]
+
+    async def forget(self, workspace_id: UUID) -> int:
+        statement = delete(db.BufferedMessage).where(
+            db.BufferedMessage.workspace_id == workspace_id
+        )
+        async with self._sessions.begin() as session:
+            result = await session.execute(statement)
+            return int(result.rowcount)  # type: ignore[attr-defined]
+
+    def _to_recent(self, row: db.BufferedMessage) -> RecentMessage | None:
+        try:
+            text = self._encryptor.decrypt(row.text_encrypted)
+        except DecryptionError:
+            return None  # written with a key since removed: context is best effort
+        return RecentMessage(
+            message_id=row.message_id,
+            reply_to_message_id=row.reply_to_message_id,
+            sender=ChatUser(
+                platform=row.platform,
+                user_id=row.sender_id,
+                display_name=row.sender_name,
+                username=row.sender_username,
+            ),
+            text=text,
+            sent_at=row.sent_at,
+        )
 
 
 class SqlPollCursors:
@@ -73,7 +182,9 @@ def _winner[T](found: T | None) -> T:
 
 
 def _to_workspace(row: db.Workspace) -> Workspace:
-    return Workspace(id=row.id, name=row.name)
+    return Workspace(
+        id=row.id, name=row.name, keeps_context=row.settings.get(KEEP_CONTEXT, True) is not False
+    )
 
 
 def _to_linked_repo(row: db.RepoConnection) -> LinkedRepo:
@@ -220,6 +331,17 @@ class SqlWorkspaces:
                 if oldest:
                     oldest.is_default = True
             return True
+
+    async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None:
+        statement = (
+            update(db.Workspace)
+            .where(db.Workspace.id == workspace_id)
+            .values(
+                settings=db.Workspace.settings.op("||")(func.jsonb_build_object(KEEP_CONTEXT, keep))
+            )
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
 
 
 class SqlMembers:
