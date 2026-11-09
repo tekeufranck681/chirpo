@@ -55,3 +55,15 @@ class CodeHostUnavailableError(CodeHostError):
 
 class LastAdminError(Exception):
     """The change would leave a workspace without an admin."""
+
+
+class InvalidProposalError(ValueError):
+    """The LLM proposed an unknown action or arguments that don't validate.
+
+    `problems` name the fields and error types only, never the values, which are untrusted text.
+    """
+
+    def __init__(self, action: str, problems: tuple[str, ...]) -> None:
+        super().__init__(f"invalid {action!r} proposal: {'; '.join(problems)}")
+        self.action = action
+        self.problems = problems
