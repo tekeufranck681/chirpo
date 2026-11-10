@@ -15,6 +15,7 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 LogFormat = Literal["auto", "json", "console"]
 IntakeMode = Literal["polling", "webhook"]
 LLMProviderName = Literal["gemini"]
+LLMThinking = Literal["minimal", "low", "medium", "high"]
 TELEGRAM_SECRET = re.compile(r"[A-Za-z0-9_-]{1,256}")
 
 
@@ -54,6 +55,8 @@ class Settings(BaseSettings):
     llm_provider: LLMProviderName = "gemini"
     llm_model: str | None = None
     llm_api_key: SecretStr | None = None
+    # How much the model thinks before answering; unset: the provider's default (D48).
+    llm_thinking: LLMThinking | None = None
 
     # Recent chat messages kept (encrypted) as context for the LLM; 0 keeps none (D46).
     message_buffer_hours: int = Field(default=24, ge=0, le=24 * 30)

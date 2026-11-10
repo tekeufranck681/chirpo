@@ -359,3 +359,76 @@ async def test_a_read_next_to_a_change_shows_both() -> None:
     assert parts[0].startswith(messages.ISSUES_TITLE.split(" {")[0].format(state="Open"))
     assert parts[1].startswith(messages.DRY_RUN_HEADER)
     assert world.codehost.issues.keys() == {(SANDBOX.key, 1), (SANDBOX.key, 2), (SANDBOX.key, 3)}
+
+
+async def test_the_context_is_gathered_at_the_same_time() -> None:
+    import asyncio
+
+    world = World([CHECKOUT])
+    await world.linked()
+    events: list[str] = []
+    list_issues, members_all = world.codehost.list_issues, world.members.all
+
+    async def slow_issues(*args: object, **kwargs: object) -> object:
+        events.append("issues start")
+        await asyncio.sleep(0.01)
+        events.append("issues end")
+        return await list_issues(*args, **kwargs)  # type: ignore[arg-type]
+
+    async def members(*args: object, **kwargs: object) -> object:
+        events.append("members")
+        return await members_all(*args, **kwargs)  # type: ignore[arg-type]
+
+    world.codehost.list_issues = slow_issues  # type: ignore[method-assign]
+    world.members.all = members  # type: ignore[method-assign]
+    await world.say("checkout crashes")
+    assert events.index("members") < events.index("issues end")
+
+
+async def test_each_step_is_timed_in_the_logs_without_the_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    with caplog.at_level("INFO", logger="chirpo.core.interpreter"):
+        await world.say("checkout crashes on Android 13")
+    [line] = [r.getMessage() for r in caplog.records if r.name == "chirpo.core.interpreter"]
+    for step in ("context_ms=", "model_ms=", "resolve_ms=", "reply_ms=", "total_ms="):
+        assert step in line
+    assert "checkout" not in line.casefold()
+
+
+async def test_a_question_is_timed_too(caplog: pytest.LogCaptureFixture) -> None:
+    world = World([AskClarifyingQuestion(question="Which issue?")])
+    await world.linked()
+    with caplog.at_level("INFO", logger="chirpo.core.interpreter"):
+        await world.say("move it to done")
+    [line] = [r.getMessage() for r in caplog.records if r.name == "chirpo.core.interpreter"]
+    assert "model_ms=" in line and "total_ms=" in line
+
+
+async def test_a_github_failure_stops_the_other_lookups() -> None:
+    import asyncio
+
+    from chirpo.core.errors import CodeHostUnavailableError
+
+    world = World([CHECKOUT])
+    await world.linked()
+    finished: list[str] = []
+    members_all = world.members.all
+
+    async def down(*args: object, **kwargs: object) -> list[object]:
+        raise CodeHostUnavailableError("GitHub 502")
+
+    async def slow_members(*args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.05)
+        finished.append("members")
+        return await members_all(*args, **kwargs)  # type: ignore[arg-type]
+
+    world.codehost.list_issues = down  # type: ignore[method-assign]
+    world.members.all = slow_members  # type: ignore[method-assign]
+    with pytest.raises(CodeHostUnavailableError):
+        await world.say("checkout crashes")
+    await asyncio.sleep(0.1)
+    assert finished == []
+    assert world.messaging.sent[-1][1] == messages.GITHUB_TROUBLE

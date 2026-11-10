@@ -31,7 +31,8 @@ from chirpo.core.llm import Interpretation, InterpretRequest
 from chirpo.core.tools import parse_tool_call
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"  # 96% on the evals, ~3 s, larger free quota (D48)
+DEFAULT_THINKING = "low"  # without it, flash-lite drops the second of two requests (D48)
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 # Only failures where the request surely never ran are retried: a slow answer is not, since a
 # retry would bill the thinking again and keep the person waiting minutes.
@@ -55,17 +56,20 @@ class GeminiProvider:
         *,
         client: httpx.AsyncClient | None = None,
         sleep: Sleep = asyncio.sleep,
+        thinking: str | None = None,
     ) -> None:
-        """`client` is shared and left open (a worker keeps one); without it each call opens one."""
+        """`client` is shared and left open (a worker keeps one); without it each call opens one.
+        `thinking`: Gemini's thinking level ("minimal" to "high"); None keeps the model's."""
         if not _MODEL_NAME.fullmatch(model):
             raise LLMSetupError(f"CHIRPO_LLM_MODEL={model!r} isn't a Gemini model name")
         self.model = model
         self._key = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         self._client = client
         self._sleep = sleep
+        self.thinking = thinking
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
-        return self._interpretation(await self._post(_body(request)))
+        return self._interpretation(await self._post(_body(request, self.thinking)))
 
     async def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(len(RETRY_DELAYS) + 1):
@@ -139,7 +143,7 @@ class GeminiProvider:
         )
 
 
-def _body(request: InterpretRequest) -> dict[str, Any]:
+def _body(request: InterpretRequest, thinking: str | None) -> dict[str, Any]:
     declarations = [
         {
             "name": tool.name,
@@ -148,12 +152,15 @@ def _body(request: InterpretRequest) -> dict[str, Any]:
         }
         for tool in request.tools
     ]
+    config: dict[str, Any] = {"maxOutputTokens": MAX_OUTPUT_TOKENS}
+    if thinking is not None:
+        config["thinkingConfig"] = {"thinkingLevel": thinking}
     return {
         "systemInstruction": {"parts": [{"text": request.instructions}]},
         "contents": [{"role": "user", "parts": [{"text": request.message}]}],
         "tools": [{"functionDeclarations": declarations}],
         "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
-        "generationConfig": {"maxOutputTokens": MAX_OUTPUT_TOKENS},
+        "generationConfig": config,
     }
 
 

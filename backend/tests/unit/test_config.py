@@ -124,3 +124,10 @@ def test_message_buffer_keeps_a_day_by_default_and_can_be_off() -> None:
     for hours in (-1, 24 * 31):
         with pytest.raises(ValidationError):
             make_settings(message_buffer_hours=hours)
+
+
+def test_llm_thinking_level() -> None:
+    assert make_settings().llm_thinking is None
+    assert make_settings(llm_thinking="minimal").llm_thinking == "minimal"
+    with pytest.raises(ValidationError):
+        make_settings(llm_thinking="lots")

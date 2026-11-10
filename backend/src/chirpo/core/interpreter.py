@@ -8,6 +8,8 @@ host here: the reply says what would happen.
 """
 
 import asyncio
+import logging
+import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 
@@ -34,6 +36,8 @@ from chirpo.core.workspaces import LinkedRepo
 
 RECENT_MESSAGES = 20
 TYPING_REFRESH_SECONDS = 4.0  # Telegram shows "typing…" for 5 seconds per request
+
+log = logging.getLogger(__name__)
 
 
 async def interpret(request: Request) -> None:
@@ -62,27 +66,63 @@ async def interpret(request: Request) -> None:
         await _answer(request, actor, services.llm, repos)
 
 
+class _Timer:
+    """Milliseconds per step of a request, logged once at the end: no message content."""
+
+    def __init__(self) -> None:
+        self._start = self._last = time.perf_counter()
+        self._laps: dict[str, int] = {}
+
+    def lap(self, step: str) -> None:
+        now = time.perf_counter()
+        self._laps[step] = round((now - self._last) * 1000)
+        self._last = now
+
+    def log(self) -> None:
+        steps = " ".join(f"{step}_ms={ms}" for step, ms in self._laps.items())
+        total = round((time.perf_counter() - self._start) * 1000)
+        log.info("request_interpreted %s total_ms=%d", steps, total)
+
+
 async def _answer(
     request: Request, actor: Actor, llm: LLMProvider, repos: Sequence[LinkedRepo]
 ) -> None:
-    services, default = actor.services, default_of(repos)
+    timer = _Timer()
     try:
-        open_issues = await services.codehost.list_issues(default, IssueQuery(limit=MAX_ISSUES))
-    except CodeHostError:
-        await request.reply(messages.GITHUB_TROUBLE)
+        await _answer_timed(request, actor, llm, repos, timer)
+    except BaseException:
+        timer.lap("failed")  # the step that was running
         raise
-    team = Team(
-        members=await services.members.all(actor.workspace.id),
-        repos=repos,
-        open_issues=open_issues,
-    )
-    recent, replied = await _conversation(request, actor)
+    finally:
+        timer.log()
+
+
+async def _answer_timed(
+    request: Request, actor: Actor, llm: LLMProvider, repos: Sequence[LinkedRepo], timer: _Timer
+) -> None:
+    services, default = actor.services, default_of(repos)
+    try:  # at the same time; the first failure cancels the others
+        async with asyncio.TaskGroup() as group:
+            issues = group.create_task(
+                services.codehost.list_issues(default, IssueQuery(limit=MAX_ISSUES))
+            )
+            members = group.create_task(services.members.all(actor.workspace.id))
+            conversation = group.create_task(_conversation(request, actor))
+    except ExceptionGroup as failures:
+        error = failures.exceptions[0]
+        if isinstance(error, CodeHostError):
+            await request.reply(messages.GITHUB_TROUBLE)
+        raise error from None
+    open_issues, (recent, replied) = issues.result(), conversation.result()
+    team = Team(members=members.result(), repos=repos, open_issues=open_issues)
+    timer.lap("context")
     interpretation = await _ask_model(
         request,
         llm,
         request.message.text,
         context=context_blocks(team, recent=recent, replied=replied),
     )
+    timer.lap("model")
     if interpretation is None:
         return
 
@@ -100,6 +140,7 @@ async def _answer(
     except CodeHostError:
         await request.reply(messages.GITHUB_TROUBLE)
         raise
+    timer.lap("resolve")
     if result is None:  # a repo the sender may not read; they were told
         return
     if isinstance(result, Question):
@@ -124,6 +165,7 @@ async def _answer(
     if changes:
         parts.append(describe(changes, default))
     await request.reply("\n\n".join(parts))
+    timer.lap("reply")
 
 
 @asynccontextmanager

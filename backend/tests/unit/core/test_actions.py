@@ -166,11 +166,20 @@ class TestIssueRef:
 
     @pytest.mark.parametrize(
         "value",
-        [{}, {"number": 1, "description": "x"}, {"number": 0}, {"description": "  "}],
+        [{}, {"number": 0}, {"description": "  "}, {"number": 0, "description": "x"}],
     )
-    def test_needs_exactly_one_valid_way_to_point_at_the_issue(self, value: dict[str, Any]) -> None:
+    def test_needs_a_valid_way_to_point_at_the_issue(self, value: dict[str, Any]) -> None:
         with pytest.raises(ValueError):
             IssueRef.model_validate(value)
+
+    def test_the_number_wins_when_both_are_given(self) -> None:
+        # Models sometimes add the description they matched; the number is the exact one.
+        ref = IssueRef.model_validate({"number": 12, "description": "the avatar upload crash"})
+        assert (ref.number, ref.description) == (12, None)
+
+    def test_a_null_number_with_a_description_is_a_description(self) -> None:
+        ref = IssueRef.model_validate({"number": None, "description": "the avatar crash"})
+        assert (ref.number, ref.description) == (None, "the avatar crash")
 
 
 class TestModels:
