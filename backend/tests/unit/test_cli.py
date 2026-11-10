@@ -164,17 +164,21 @@ def test_llm_try_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_llm_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     from chirpo.adapters.llm import llm_from_settings
-    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, GeminiProvider
+    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, DEFAULT_THINKING, GeminiProvider
 
     assert llm_from_settings(_unconfigured(monkeypatch)) is None  # type: ignore[arg-type]
     provider = llm_from_settings(_unconfigured(monkeypatch, llm_api_key="k"))  # type: ignore[arg-type]
     assert isinstance(provider, GeminiProvider)
     assert provider.model == DEFAULT_MODEL
+    assert provider.thinking == DEFAULT_THINKING
     chosen = llm_from_settings(
         _unconfigured(monkeypatch, llm_api_key="k", llm_model="gemini-3.5-flash-lite")  # type: ignore[arg-type]
     )
     assert chosen is not None
     assert chosen.model == "gemini-3.5-flash-lite"
+    thinking = llm_from_settings(_unconfigured(monkeypatch, llm_api_key="k", llm_thinking="low"))  # type: ignore[arg-type]
+    assert isinstance(thinking, GeminiProvider)
+    assert thinking.thinking == "low"
 
 
 def test_a_blank_llm_key_counts_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:

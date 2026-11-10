@@ -83,9 +83,12 @@ class IssueRef(Proposal):
     )
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> Self:
-        if (self.number is None) == (self.description is None):
+    def _one_way(self) -> Self:
+        if self.number is None and self.description is None:
             raise ValueError("give either the number or a description")
+        if self.number is not None and self.description is not None:
+            # Models sometimes add the description they matched; the number is the exact one.
+            return self.model_copy(update={"description": None})
         return self
 
 

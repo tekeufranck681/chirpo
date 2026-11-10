@@ -89,6 +89,21 @@ class TestRequest:
         assert first["parametersJsonSchema"]["type"] == "object"
         assert "temperature" not in body.get("generationConfig", {})
 
+    async def test_thinking_level_is_sent_when_chosen(self, gemini: respx.MockRouter) -> None:
+        route = gemini.post(URL).respond(json=payload("create_issue"))
+        await interpret(GeminiProvider(KEY, thinking="low"))
+        config = json.loads(route.calls.last.request.content)["generationConfig"]
+        assert config["thinkingConfig"] == {"thinkingLevel": "low"}
+
+    async def test_no_thinking_level_leaves_the_models_default(
+        self, provider: GeminiProvider, gemini: respx.MockRouter
+    ) -> None:
+        route = gemini.post(URL).respond(json=payload("create_issue"))
+        await interpret(provider)
+        assert (
+            "thinkingConfig" not in json.loads(route.calls.last.request.content)["generationConfig"]
+        )
+
     def test_model_names_are_checked(self) -> None:
         with pytest.raises(LLMSetupError):
             GeminiProvider(KEY, "../files")

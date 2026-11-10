@@ -16,6 +16,8 @@ def llm_from_settings(
     key = settings.llm_api_key
     if key is None or not key.get_secret_value().strip():
         return None
-    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, GeminiProvider
+    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, DEFAULT_THINKING, GeminiProvider
 
-    return GeminiProvider(key, settings.llm_model or DEFAULT_MODEL, client=client)
+    model = settings.llm_model or DEFAULT_MODEL
+    thinking = settings.llm_thinking or DEFAULT_THINKING
+    return GeminiProvider(key, model, client=client, thinking=thinking)
