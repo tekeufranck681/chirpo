@@ -1,7 +1,13 @@
 import re
 
 from chirpo.core.actions import ACTIONS
-from chirpo.core.llm import MAX_MESSAGE_CHARS, interpret_request, system_prompt
+from chirpo.core.llm import (
+    IMAGE_OWN,
+    MAX_MESSAGE_CHARS,
+    RequestImage,
+    interpret_request,
+    system_prompt,
+)
 from chirpo.core.tools import tool_specs
 
 
@@ -95,3 +101,77 @@ def test_images_travel_with_the_request_and_the_text_is_untouched() -> None:
     assert with_image.images == (picture,)
     assert without.images == ()
     assert with_image.message == without.message
+
+
+IMAGES_RULES = "## Images"
+PROPOSAL_RULES = "## Changing a proposal"
+
+
+def has(request, text: str) -> bool:  # type: ignore[no-untyped-def]
+    return text in request.instructions
+
+
+class TestPromptSections:
+    """Rules are only sent when a request can use them: shorter prompts for the common case,
+    and room to be as detailed as needed where it matters."""
+
+    def test_a_plain_request_gets_neither_section(self) -> None:
+        request = interpret_request("checkout crashes", "Franck")
+        assert not has(request, IMAGES_RULES) and not has(request, PROPOSAL_RULES)
+        assert "Ignore the images when the message asks for something" not in request.instructions
+
+    def test_an_attached_image_brings_the_image_rules(self) -> None:
+        image = RequestImage(label=IMAGE_OWN, mime_type="image/png", data=b"x")
+        request = interpret_request("log this", "Franck", images=[image])
+        assert has(request, IMAGES_RULES) and not has(request, PROPOSAL_RULES)
+
+    def test_a_tool_to_look_at_an_image_brings_the_image_rules(self) -> None:
+        request = interpret_request("log that", "Franck", look=True)
+        assert has(request, IMAGES_RULES)
+
+    def test_a_message_with_an_image_marker_brings_the_image_rules(self) -> None:
+        for kind, marker in [
+            ("recent_messages", "[10:02] Annie: [image] the app freezes"),
+            ("recent_messages", "[10:02] Annie: [image, can be looked at]"),
+            ("replied_message", "[10:02] Annie: [file]"),
+            ("recent_messages", "[10:02] Annie: [voice message]"),
+        ]:
+            request = interpret_request("log it", "Franck", context=[(kind, marker)])
+            assert has(request, IMAGES_RULES), marker
+
+    def test_a_pending_proposal_brings_the_card_rules(self) -> None:
+        request = interpret_request(
+            "assign it to me", "Franck", context=[("pending_proposal", "- create_issue {}")]
+        )
+        assert has(request, PROPOSAL_RULES) and not has(request, IMAGES_RULES)
+        assert "`pending_proposal`" in request.instructions
+
+    def test_both_sections_come_in_a_fixed_order_before_the_untrusted_text_rules(self) -> None:
+        image = RequestImage(label=IMAGE_OWN, mime_type="image/png", data=b"x")
+        request = interpret_request(
+            "x", "Franck", images=[image], context=[("pending_proposal", "- create_issue {}")]
+        )
+        text = request.instructions
+        assert (
+            text.index(IMAGES_RULES) < text.index(PROPOSAL_RULES) < text.index("## Untrusted text")
+        )
+
+    def test_every_prompt_still_lists_the_tools_and_the_untrusted_text_rules(self) -> None:
+        for sections in (frozenset(), frozenset({"images"}), frozenset({"images", "proposal"})):
+            prompt = system_prompt(sections)
+            assert "{actions}" not in prompt and "{sections}" not in prompt
+            assert "## Untrusted text" in prompt and "## Examples" in prompt
+            assert all(f"- `{name}`" in prompt for name in ACTIONS)
+
+    def test_the_common_prompt_is_shorter_than_the_full_one(self) -> None:
+        assert len(system_prompt()) < len(system_prompt(frozenset({"images", "proposal"})))
+
+    def test_no_stray_blank_lines_where_a_section_was_left_out(self) -> None:
+        assert "\n\n\n" not in system_prompt()
+        assert "\n\n\n" not in system_prompt(frozenset({"proposal"}))
+
+    def test_the_instructions_use_the_prompt_for_their_own_sections(self) -> None:
+        request = interpret_request(
+            "x", "Franck", context=[("pending_proposal", "- create_issue {}")]
+        )
+        assert request.instructions.startswith(system_prompt(frozenset({"proposal"})))

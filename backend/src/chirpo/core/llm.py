@@ -1,10 +1,12 @@
 """What the core sends an LLM and what comes back (D45).
 
-The system prompt lives in `prompts/interpret.md`; its tool list is filled from the action
-registry. Chat text is wrapped in a block named with a random marker that only the instructions
-reveal, so the text can't close the block and pose as instructions.
+The system prompt is `prompts/base.md` plus the sections a request can use (`images.md`,
+`proposal.md`), so a plain request isn't sent rules for pictures or cards; its tool list is filled
+from the action registry. Chat text is wrapped in a block named with a random marker that only
+the instructions reveal, so the text can't close the block and pose as instructions.
 """
 
+import re
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -49,11 +51,44 @@ class Interpretation:
     output_tokens: int = 0
 
 
+SECTIONS = ("images", "proposal")  # prompts/<name>.md, in the order they are inserted
+_MEDIA_BLOCKS = frozenset({"recent_messages", "replied_message"})
+_MEDIA_MARKERS = ("[image", "[file]", "[voice message]")  # written by us, see core/context.py
+
+
 @cache
-def system_prompt() -> str:
-    template = files("chirpo.core").joinpath("prompts", "interpret.md").read_text(encoding="utf-8")
+def system_prompt(sections: frozenset[str] = frozenset()) -> str:
+    unknown = sections - set(SECTIONS)
+    if unknown:
+        raise ValueError(f"no such prompt section: {sorted(unknown)}")
+    prompts = files("chirpo.core").joinpath("prompts")
+    template = prompts.joinpath("base.md").read_text(encoding="utf-8")
+    extra = "\n\n".join(
+        prompts.joinpath(f"{name}.md").read_text(encoding="utf-8").strip()
+        for name in SECTIONS
+        if name in sections
+    )
     tools = "\n".join(_describe(spec) for spec in ACTIONS.values())
-    return template.replace("{actions}", tools).strip()
+    text = template.replace("{actions}", tools).replace("{sections}", extra)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()  # no gap where a section was left out
+
+
+def _sections_for(
+    context: Sequence[tuple[str, str]], images: Sequence[RequestImage], look: bool
+) -> frozenset[str]:
+    """The rules this request can use. A marker typed into chat only adds rules, never removes."""
+    sections = set()
+    if any(kind == "pending_proposal" for kind, _ in context):
+        sections.add("proposal")
+    media = any(
+        marker in body
+        for kind, body in context
+        if kind in _MEDIA_BLOCKS
+        for marker in _MEDIA_MARKERS
+    )
+    if images or look or media:
+        sections.add("images")
+    return frozenset(sections)
 
 
 def interpret_request(
@@ -72,7 +107,10 @@ def interpret_request(
     blocks = [_untrusted(kind, content, marker) for kind, content in context]
     blocks.append(_untrusted("chat_message", body, marker))
     return InterpretRequest(
-        instructions=f"{system_prompt()}\n\nThis request's marker is `{marker}`.",
+        instructions=(
+            f"{system_prompt(_sections_for(context, images, look))}"
+            f"\n\nThis request's marker is `{marker}`."
+        ),
         message="\n\n".join(blocks),
         tools=tool_specs() if look else tuple(t for t in tool_specs() if t.name != LOOK_TOOL),
         images=tuple(images),
