@@ -1,13 +1,16 @@
 """Protocols implemented outside the core: messaging, code host, LLM, repositories."""
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
 from chirpo.core.domain import (
     Attachment,
+    Button,
     ChatRef,
     ChatUser,
+    InboundCallback,
     InboundEvent,
     InboundMessage,
     Issue,
@@ -25,6 +28,7 @@ from chirpo.core.domain import (
     SentMessage,
 )
 from chirpo.core.llm import Interpretation, InterpretRequest
+from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -39,10 +43,24 @@ class MessagingAdapter(Protocol):
         ...
 
     async def send_message(
-        self, chat: ChatRef, text: str, *, reply_to: str | None = None
+        self,
+        chat: ChatRef,
+        text: str,
+        *,
+        reply_to: str | None = None,
+        buttons: Sequence[Button] = (),
     ) -> SentMessage: ...
 
-    async def edit_message(self, message: SentMessage, text: str) -> None: ...
+    async def edit_message(
+        self, message: SentMessage, text: str, *, buttons: Sequence[Button] = ()
+    ) -> None:
+        """Replace the text. The buttons are replaced too: none given means they are removed."""
+        ...
+
+    async def answer_callback(self, callback: InboundCallback, text: str | None = None) -> None:
+        """Acknowledge a button press, with a short note only the person who pressed sees.
+        Best effort: the platform drops old presses."""
+        ...
 
     async def show_typing(self, chat: ChatRef) -> None:
         """Show that the bot is working on an answer (a few seconds; best effort)."""
@@ -209,6 +227,42 @@ class LLMProvider(Protocol):
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
         """Proposals for the message, validated against the action models. Raises `LLMError`s."""
+        ...
+
+
+class PendingActions(Protocol):
+    """Proposals waiting for confirmation. Every call is scoped to a workspace (D8)."""
+
+    async def create(
+        self,
+        *,
+        workspace_id: UUID,
+        requested_by: UUID,
+        chat: ChatRef,
+        steps: Sequence[Step],
+        expires_at: datetime,
+    ) -> PendingAction: ...
+
+    async def attach_message(self, workspace_id: UUID, pending_id: UUID, message_id: str) -> None:
+        """Records the card, so a press can be checked against the message it came from."""
+        ...
+
+    async def get(self, workspace_id: UUID, pending_id: UUID) -> PendingAction | None: ...
+
+    async def advance(
+        self,
+        workspace_id: UUID,
+        pending_id: UUID,
+        *,
+        expect: PendingStatus,
+        to: PendingStatus,
+        now: datetime,
+        by: UUID | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> PendingAction | None:
+        """Moves a proposal from `expect` to `to`, atomically: None when it isn't in `expect`
+        any more (someone else got there first), or, leaving `proposed` for anything but `expired`,
+        when it has expired. Only one of two simultaneous presses wins."""
         ...
 
 

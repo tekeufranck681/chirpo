@@ -22,6 +22,7 @@ from chirpo.db.repositories import (
     SqlAuditLog,
     SqlMembers,
     SqlMessageBuffer,
+    SqlPendingActions,
     SqlProcessedEvents,
     SqlWorkspaces,
 )
@@ -138,12 +139,14 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         audit=audit,
         codehost=codehost,
         permissions=PermissionChecker(codehost),
+        pending=SqlPendingActions(sessions),
         identity=identity,
         app_install_url=await _app_install_url(auth),
         buffer=ctx["buffer"] if settings.message_buffer_hours else None,
         context_hours=settings.message_buffer_hours,
         llm=llm_from_settings(settings, client=ctx["http"]),
         read_images=settings.read_images,
+        proposal_ttl=timedelta(minutes=settings.proposal_ttl_minutes),
         limits=RateLimiter(
             RedisCounters(ctx["redis"]),
             Limits(

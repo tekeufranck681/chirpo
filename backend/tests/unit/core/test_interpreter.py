@@ -48,6 +48,7 @@ from tests.fakes import (
     FakeMembers,
     FakeMessageBuffer,
     FakeMessaging,
+    FakePendingActions,
     FakeWorkspaces,
     make_message,
 )
@@ -78,6 +79,7 @@ class World:
             audit=self.audit,
             codehost=self.codehost,
             permissions=PermissionChecker(self.codehost),
+            pending=FakePendingActions(),
             buffer=self.buffer,
             context_hours=24,
             llm=self.llm,
@@ -108,7 +110,7 @@ CHECKOUT = CreateIssue(
 )
 
 
-async def test_a_bug_report_becomes_a_dry_run() -> None:
+async def test_a_bug_report_becomes_a_card() -> None:
     world = World([CHECKOUT])
     await world.linked()
     reply = await world.say("checkout crashes on Android 13, give it to Franck, it's urgent")
@@ -122,10 +124,12 @@ async def test_a_bug_report_becomes_a_dry_run() -> None:
             "  ("
             + messages.LABELS_LEFT_OUT.format(labels='"urgent"', repo=SANDBOX.full_name)
             + ")",
+            "",
+            messages.CONFIRM_FOOTER.format(name="Tekeu Franck"),
         ]
     )
     assert world.messaging.typing == [CHAT]
-    assert world.codehost.issues == {}  # a dry run: nothing created
+    assert world.codehost.issues == {}  # a card to confirm: nothing created yet
 
 
 async def test_actions_on_an_issue_show_its_title() -> None:
@@ -138,7 +142,7 @@ async def test_actions_on_an_issue_show_its_title() -> None:
     await world.linked()
     await world.codehost.create_issue(SANDBOX, NewIssue(title="Checkout crashes on Android 13"))
     reply = await world.say("move #1 to in progress and give the checkout bug to Annie")
-    assert reply.splitlines()[1:] == [
+    assert reply.splitlines()[1:-2] == [
         '• Move #1 "Checkout crashes on Android 13" to "in progress"',
         '• Assign annie-gh to #1 "Checkout crashes on Android 13"',
     ]
@@ -361,14 +365,14 @@ async def test_nothing_found() -> None:
     )
 
 
-async def test_a_read_next_to_a_change_shows_both() -> None:
+async def test_a_read_next_to_a_change_gets_an_answer_and_a_card() -> None:
     world = World([MyIssues(), CHECKOUT])
     await world.linked()
     await _issues(world)
-    reply = await world.say("what's mine, and log the checkout crash for Franck")
-    parts = reply.split("\n\n")
-    assert parts[0].startswith(messages.ISSUES_TITLE.split(" {")[0].format(state="Open"))
-    assert parts[1].startswith(messages.DRY_RUN_HEADER)
+    await world.say("what's mine, and log the checkout crash for Franck")
+    reads, card = (text for _, text, _ in world.messaging.sent)  # two messages: answer, then card
+    assert reads.startswith(messages.ISSUES_TITLE.split(" {")[0].format(state="Open"))
+    assert card.startswith(messages.DRY_RUN_HEADER)
     assert world.codehost.issues.keys() == {(SANDBOX.key, 1), (SANDBOX.key, 2), (SANDBOX.key, 3)}
 
 

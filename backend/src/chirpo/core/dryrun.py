@@ -1,5 +1,6 @@
-"""The reply that says what chirpo would do with changes (M4.8), before confirming and running
-arrive in M5. Reads run right away instead (core/listing.py)."""
+"""The card that says what chirpo will do with changes, shown for confirming (M4.8, M5.2). It shows
+the whole resolved payload; a long body or comment is cut with a count of what is hidden. Reads
+run right away instead (core/listing.py)."""
 
 from collections.abc import Sequence
 
@@ -19,27 +20,29 @@ from chirpo.core.actions import (
 )
 from chirpo.core.context import clean
 from chirpo.core.domain import RepoRef
+from chirpo.core.outbound import break_mentions
 from chirpo.core.resolution import Resolved
 
-MAX_SHOWN = 120  # characters of a title, body or comment in the reply
+MAX_TITLE = 256  # GitHub's limit: a title is always shown whole
+MAX_TEXT = 600  # characters of a body or comment shown on the card
 
 
-def describe(steps: Sequence[Resolved], default_repo: RepoRef) -> str:
+def describe(steps: Sequence[Resolved], default_repo: RepoRef, text_limit: int = MAX_TEXT) -> str:
     lines = [messages.DRY_RUN_HEADER]
     for step in steps:
-        lines += _lines(step, default_repo)
+        lines += _lines(step, default_repo, text_limit)
         lines += [messages.DRY_NOTE.format(note=note) for note in step.notes]
     return "\n".join(lines)
 
 
-def _lines(step: Resolved, default_repo: RepoRef) -> list[str]:
+def _lines(step: Resolved, default_repo: RepoRef, limit: int) -> list[str]:
     proposal, repo = step.proposal, step.repo.full_name
     issue = _issue(step, default_repo)
     match proposal:
         case CreateIssue():
-            return _draft(proposal, repo)
+            return _draft(proposal, repo, limit)
         case CreateIssues():
-            return [line for draft in proposal.issues for line in _draft(draft, repo)]
+            return [line for draft in proposal.issues for line in _draft(draft, repo, limit)]
         case AssignIssue():
             return [messages.DRY_ASSIGN.format(people=_people(proposal.assignees), issue=issue)]
         case UnassignIssue():
@@ -53,7 +56,7 @@ def _lines(step: Resolved, default_repo: RepoRef) -> list[str]:
             labels = ", ".join(proposal.labels)
             return [messages.DRY_REMOVE_LABELS.format(labels=labels, issue=issue)]
         case CommentOnIssue():
-            return [messages.DRY_COMMENT.format(issue=issue, text=_short(proposal.body))]
+            return [messages.DRY_COMMENT.format(issue=issue, text=_text(proposal.body, limit))]
         case CloseIssue():
             reason = messages.CLOSE_REASONS[proposal.reason.value]
             return [messages.DRY_CLOSE.format(issue=issue, reason=reason)]
@@ -62,21 +65,25 @@ def _lines(step: Resolved, default_repo: RepoRef) -> list[str]:
     raise TypeError(f"no dry-run text for {type(proposal).__name__}")
 
 
-def _draft(draft: IssueDraft, repo: str) -> list[str]:
-    lines = [messages.DRY_CREATE.format(repo=repo, title=_short(draft.title))]
+def _draft(draft: IssueDraft, repo: str, limit: int) -> list[str]:
+    lines = [
+        messages.DRY_CREATE.format(repo=repo, title=break_mentions(clean(draft.title, MAX_TITLE)))
+    ]
     if draft.assignees:
         lines.append(messages.DRY_ASSIGNED.format(people=_people(draft.assignees)))
     if draft.labels:
         lines.append(messages.DRY_LABELS.format(labels=", ".join(draft.labels)))
     if draft.body:
-        lines.append(messages.DRY_DETAILS.format(text=_short(draft.body)))
+        lines.append(messages.DRY_DETAILS.format(text=_text(draft.body, limit)))
     return lines
 
 
 def _issue(step: Resolved, default_repo: RepoRef) -> str:
     if step.issue is None:
         return ""
-    text = messages.DRY_ISSUE.format(number=step.issue.number, title=_short(step.issue.title))
+    text = messages.DRY_ISSUE.format(
+        number=step.issue.number, title=break_mentions(clean(step.issue.title, MAX_TITLE))
+    )
     if step.repo != default_repo:
         text += messages.DRY_IN_REPO.format(repo=step.repo.full_name)
     return text
@@ -87,7 +94,10 @@ def _people(logins: Sequence[str]) -> str:
     return ", ".join(logins)
 
 
-def _short(text: str) -> str:
-    """Untrusted text (titles, bodies) as one visible line, cut to MAX_SHOWN."""
-    line = clean(text, MAX_SHOWN + 1)
-    return line if len(line) <= MAX_SHOWN else line[: MAX_SHOWN - 1] + "…"
+def _text(text: str, limit: int) -> str:
+    """Untrusted text as one visible line; what doesn't fit is counted, not silently dropped.
+    Mentions are broken: Telegram would notify whoever has that username."""
+    line = break_mentions(clean(text, 10_000))
+    if len(line) <= limit:
+        return line
+    return line[:limit] + messages.DRY_MORE.format(count=len(line) - limit)

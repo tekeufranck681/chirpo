@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from chirpo.core.actions import Proposal
 from chirpo.core.domain import (
     Attachment,
+    Button,
     ChatRef,
     ChatUser,
     CloseReason,
@@ -42,6 +43,7 @@ from chirpo.core.errors import (
     MessagingForbiddenError,
 )
 from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
+from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -62,8 +64,17 @@ def make_message(text: str, **overrides: Any) -> InboundMessage:
     return InboundMessage(**values)
 
 
-def make_callback(data: str) -> InboundCallback:
-    return InboundCallback(event_id="2", chat=CHAT, sender=USER, message_id="11", data=data)
+def make_callback(data: str, **overrides: Any) -> InboundCallback:
+    values: dict[str, Any] = {
+        "event_id": "2",
+        "query_id": "q-2",
+        "chat": CHAT,
+        "sender": USER,
+        "message_id": "11",
+        "data": data,
+        **overrides,
+    }
+    return InboundCallback(**values)
 
 
 class FakeMessaging:
@@ -78,20 +89,35 @@ class FakeMessaging:
         self.downloads: list[tuple[str, int]] = []  # (file id, size limit) asked for
         self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
         self.chat_admins: set[str] = set()  # user ids that run the group
+        self.buttons: dict[str, tuple[Button, ...]] = {}  # message id -> buttons it shows now
+        self.answered: list[tuple[InboundCallback, str | None]] = []
 
     def parse_update(self, raw: Mapping[str, Any]) -> InboundEvent | None:
         return None
 
     async def send_message(
-        self, chat: ChatRef, text: str, *, reply_to: str | None = None
+        self,
+        chat: ChatRef,
+        text: str,
+        *,
+        reply_to: str | None = None,
+        buttons: Sequence[Button] = (),
     ) -> SentMessage:
         if chat.chat_id in self.unreachable_chats:
             raise MessagingForbiddenError(f"can't message {chat.chat_id}")
         self.sent.append((chat, text, reply_to))
-        return SentMessage(chat=chat, message_id=str(100 + len(self.sent)))
+        message_id = str(100 + len(self.sent))
+        self.buttons[message_id] = tuple(buttons)
+        return SentMessage(chat=chat, message_id=message_id)
 
-    async def edit_message(self, message: SentMessage, text: str) -> None:
+    async def edit_message(
+        self, message: SentMessage, text: str, *, buttons: Sequence[Button] = ()
+    ) -> None:
         self.edited.append((message, text))
+        self.buttons[message.message_id] = tuple(buttons)
+
+    async def answer_callback(self, callback: InboundCallback, text: str | None = None) -> None:
+        self.answered.append((callback, text))
 
     async def show_typing(self, chat: ChatRef) -> None:
         self.typing.append(chat)
@@ -119,6 +145,63 @@ class FakeMessaging:
 
     async def aclose(self) -> None:
         pass
+
+
+class FakePendingActions:
+    def __init__(self) -> None:
+        self.rows: dict[UUID, PendingAction] = {}
+
+    async def create(
+        self,
+        *,
+        workspace_id: UUID,
+        requested_by: UUID,
+        chat: ChatRef,
+        steps: Sequence[Step],
+        expires_at: datetime,
+    ) -> PendingAction:
+        row = PendingAction(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            requested_by=requested_by,
+            chat=chat,
+            steps=tuple(steps),
+            expires_at=expires_at,
+        )
+        self.rows[row.id] = row
+        return row
+
+    async def attach_message(self, workspace_id: UUID, pending_id: UUID, message_id: str) -> None:
+        if (row := await self.get(workspace_id, pending_id)) is not None:
+            self.rows[pending_id] = row.model_copy(update={"message_id": message_id})
+
+    async def get(self, workspace_id: UUID, pending_id: UUID) -> PendingAction | None:
+        row = self.rows.get(pending_id)
+        return row if row is not None and row.workspace_id == workspace_id else None
+
+    async def advance(
+        self,
+        workspace_id: UUID,
+        pending_id: UUID,
+        *,
+        expect: PendingStatus,
+        to: PendingStatus,
+        now: datetime,
+        by: UUID | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> PendingAction | None:
+        row = await self.get(workspace_id, pending_id)
+        if row is None or row.status != expect:
+            return None
+        if expect == PendingStatus.PROPOSED and to != PendingStatus.EXPIRED and row.is_expired(now):
+            return None
+        changes: dict[str, Any] = {"status": to}
+        if by is not None:
+            changes["confirmed_by"] = by
+        if result is not None:
+            changes["result"] = result
+        self.rows[pending_id] = moved = row.model_copy(update=changes)
+        return moved
 
 
 class FakeProcessedEvents:

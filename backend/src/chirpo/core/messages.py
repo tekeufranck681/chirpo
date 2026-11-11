@@ -148,9 +148,47 @@ MEMBERS_MORE = "... and {count} more."
 
 ISSUE_USAGE = "Give the issue a title: /issue Login button broken"
 ISSUE_TITLE_TOO_LONG = "That title is too long for GitHub (256 characters at most)."
-ISSUE_BODY = "Requested by @{login} via chirpo."
+ISSUE_BODY = "Requested by @{login} via chirpo."  # the same line closes every posted text
 ISSUE_CREATED = "Created #{number}: {title}\n{url}"
 ISSUE_FAILED = "GitHub didn't accept that issue ({reason}). Nothing was created."
+
+# Confirming and running (M5, D53)
+BUTTON_CONFIRM = "✅ Confirm"
+BUTTON_CANCEL = "✖ Cancel"
+CONFIRM_FOOTER = "Only {name} or a maintainer can confirm."
+RUNNING = "⏳ Working on it…"
+CANCELLED = "Cancelled by {name}."
+REQUESTED_BY = ISSUE_BODY
+EXPIRED = "This request expired. Ask me again."
+CB_UNAVAILABLE = "That request isn't available any more."
+CB_ALREADY = "That request was already handled."
+CB_RUNNING = "Already on it."
+CB_EXPIRED = "That request expired. Ask me again."
+CB_NOT_ALLOWED = "Only {name} or a maintainer can confirm this."
+CB_NOT_ALLOWED_ANYONE = "Only a maintainer can confirm this."
+CB_ANONYMOUS = "Anonymous admins can't confirm. Use your own account."
+CB_WRITE_LIMITED = "That's a lot of changes on GitHub in a short time. Try again in {wait}."
+CB_CANCELLED = "Cancelled."
+CB_STARTED = "On it."
+DONE_ASSIGNED = "Assigned {people} to {issue}."
+DONE_UNASSIGNED = "Removed {people} from {issue}."
+DONE_STATUS = '{issue} is now "{status}".'
+DONE_ADDED_LABELS = "Added {labels} to {issue}."
+DONE_REMOVED_LABELS = "Removed {labels} from {issue}."
+DONE_COMMENTED = "Commented on {issue}.\n{url}"
+DONE_CLOSED = "Closed {issue} as {reason}."
+DONE_REOPENED = "Reopened {issue}."
+STOPPED = "I stopped there: {reason}"
+STOPPED_REST = "The remaining steps weren't run."
+STEP_NO_LONGER_ALLOWED = "{name} isn't allowed to do that any more."
+STEP_NOT_FOUND = "that issue or repo wasn't found on GitHub."
+STEP_REFUSED = "GitHub refused it ({reason})."
+STEP_WRITE_LIMITED = "too many changes on GitHub in a short time. Try again in {wait}."
+STEP_CRASHED = "something unexpected went wrong. It may be partly done: check GitHub."
+STEP_NOT_LINKED = "that repo isn't linked to this chat any more."
+TOO_BIG = "That's too much to confirm in one message. Ask for fewer things at a time."
+STEP_BROKEN = "something about this request doesn't add up. Nothing else was run."
+CRASHED = "Something went wrong while running that. It may be partly done: check GitHub."
 
 # Resolving what a message meant (D47)
 PERSON_UNKNOWN = (
@@ -184,7 +222,7 @@ NOT_A_REQUEST = (
     'I can create and update issues for you, e.g. "{bot} checkout crashes on Android, '
     'give it to Franck". See /help.'
 )
-DRY_RUN_HEADER = "Here's what I'd do (nothing runs yet; confirming comes soon):"
+DRY_RUN_HEADER = "Here's what I'll do once it is confirmed:"
 DRY_CREATE = '• Create an issue in {repo}: "{title}"'
 DRY_ASSIGNED = "  assigned to {people}"
 DRY_LABELS = "  labels: {labels}"
@@ -208,6 +246,7 @@ ISSUE_ALSO = " (also {people})"
 FILTER_YOURS = " assigned to you"
 DRY_IN_REPO = " in {repo}"
 DRY_NOTE = "  ({note})"
+DRY_MORE = "… (+{count} more characters)"
 CLOSE_REASONS = {"completed": "done", "not_planned": "not planned", "duplicate": "a duplicate"}
 
 

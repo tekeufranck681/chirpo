@@ -109,13 +109,23 @@ class InboundCallback(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     event_id: str
+    query_id: str  # what the platform wants back to acknowledge the press
     chat: ChatRef
     sender: ChatUser
-    message_id: str
-    data: str
+    message_id: str  # the bot message the button is on
+    data: str  # untrusted: whoever can reach the bot's chat can send any value
 
 
 InboundEvent = InboundMessage | InboundCallback
+
+
+class Button(BaseModel):
+    """An inline button under a bot message. `data` comes back in an `InboundCallback`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    data: str = Field(max_length=64)  # Telegram's limit
 
 
 class SentMessage(BaseModel):
