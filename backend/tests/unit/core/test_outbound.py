@@ -61,7 +61,7 @@ def test_no_link_or_image_can_form_but_the_address_stays_visible(text: str) -> N
     out = neutralise(text)
     unescaped = re.sub(r"\\.", "", out)  # what is left once every escaped character is removed
     assert "[" not in unescaped and "]" not in unescaped
-    assert "https://evil.example" in out
+    assert re.search(r"https://evil\.example", out)  # the address is still readable
 
 
 def test_a_plain_backslash_is_still_shown_as_one() -> None:
