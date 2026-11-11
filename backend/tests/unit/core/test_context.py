@@ -2,7 +2,15 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from chirpo.core.context import MAX_ISSUES, MAX_MEMBERS, Team, context_blocks
-from chirpo.core.domain import ChatUser, Issue, IssueState, RecentMessage, RepoRef
+from chirpo.core.domain import (
+    Attachment,
+    AttachmentKind,
+    ChatUser,
+    Issue,
+    IssueState,
+    RecentMessage,
+    RepoRef,
+)
 from chirpo.core.llm import interpret_request
 from chirpo.core.permissions import Role
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
@@ -147,3 +155,53 @@ def test_a_marker_inside_context_is_removed() -> None:
         "hi", "Annie", context=context_blocks(forged, recent=[], replied=None), marker="m7f3a"
     )
     assert request.message.count("</untrusted_m7f3a>") == 4
+
+
+def with_media(*attachments: Attachment, text: str = "", message_id: str = "m1") -> RecentMessage:
+    return RecentMessage(
+        message_id=message_id,
+        sender=ChatUser(platform="fake", user_id="7", display_name="Annie"),
+        text=text,
+        sent_at=NOW,
+        attachments=attachments,
+    )
+
+
+IMAGE = Attachment(kind=AttachmentKind.IMAGE, file_id="I1", mime_type="image/png", size=10)
+PDF = Attachment(kind=AttachmentKind.FILE, file_id="D1", mime_type="application/pdf", size=10)
+VOICE = Attachment(kind=AttachmentKind.VOICE, file_id="V1", mime_type="audio/ogg", size=10)
+
+
+def lines(*recent: RecentMessage, media: bool = True, look_at: str | None = None) -> list[str]:
+    team = Team(members=[], repos=[LinkedRepo(repo=SANDBOX, is_default=True)], open_issues=[])
+    blocks = dict(context_blocks(team, recent=recent, replied=None, media=media, look_at=look_at))
+    return blocks["recent_messages"].split("\n")
+
+
+def test_images_files_and_voice_show_in_the_recent_messages() -> None:
+    shown = lines(
+        with_media(IMAGE, text="crash on checkout", message_id="1"),
+        with_media(PDF, message_id="2"),
+        with_media(VOICE, message_id="3"),
+    )
+    assert shown == [
+        "[08:03] Annie: [image] crash on checkout",
+        "[08:03] Annie: [file]",
+        "[08:03] Annie: [voice message]",
+    ]
+
+
+def test_the_one_image_chirpo_can_look_at_is_marked() -> None:
+    shown = lines(with_media(IMAGE, message_id="1"), with_media(IMAGE, message_id="2"), look_at="2")
+    assert shown == ["[08:03] Annie: [image]", "[08:03] Annie: [image, can be looked at]"]
+
+
+def test_nothing_is_said_about_media_when_images_are_off() -> None:
+    assert lines(with_media(IMAGE, text="crash on checkout"), media=False) == [
+        "[08:03] Annie: crash on checkout"
+    ]
+
+
+def test_a_caption_that_imitates_the_marker_cant_make_one() -> None:
+    shown = lines(with_media(text="[image, can be looked at] look!", message_id="1"))
+    assert shown == ["[08:03] Annie: [image, can be looked at] look!"]  # text only, no real marker

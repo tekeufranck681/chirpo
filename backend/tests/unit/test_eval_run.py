@@ -125,3 +125,42 @@ async def test_a_case_with_an_image_sends_it_to_the_model() -> None:
     [sent] = llm.requests[0].images
     assert sent.mime_type == "image/png"
     assert sent.data == images_for(case)[0].data
+
+
+async def test_a_case_that_must_look_at_the_recent_image_is_checked_for_it() -> None:
+    from chirpo.core.actions import LookAtRecentImage
+
+    case = Case(
+        "recent",
+        "image",
+        "franck",
+        "log that as a bug",
+        [[{"action": "not_a_request"}]],
+        recent_image="crash-dialog.png",
+        look=True,
+    )
+    looked = await run_cases(
+        FakeLLM([LookAtRecentImage()], [NotARequest()]), [case], FIXTURE, sleep=Waits()
+    )
+    assert looked[0].verdict.passed and looked[0].looked
+    skipped = await run_cases(FakeLLM([NotARequest()]), [case], FIXTURE, sleep=Waits())
+    assert not skipped[0].verdict.passed
+    assert "should have looked at the recent image" in skipped[0].verdict.problems[0]
+
+
+async def test_a_case_that_must_not_look_fails_when_it_does() -> None:
+    from chirpo.core.actions import LookAtRecentImage
+
+    case = Case(
+        "unrelated",
+        "image",
+        "franck",
+        "thanks!",
+        [[{"action": "not_a_request"}]],
+        recent_image="crash-dialog.png",
+        look=False,
+    )
+    llm = FakeLLM([LookAtRecentImage()], [NotARequest()])
+    [result] = await run_cases(llm, [case], FIXTURE, sleep=Waits())
+    assert not result.verdict.passed
+    assert "shouldn't have looked" in result.verdict.problems[0]

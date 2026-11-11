@@ -203,3 +203,23 @@ def test_every_image_a_case_names_exists_and_is_really_an_image() -> None:
 
 def test_image_cases_include_injections() -> None:
     assert any(c.image and c.category == "injection" for c in CASES)
+
+
+def test_a_case_can_put_an_image_in_the_recent_messages() -> None:
+    from evals.scoring import look_candidate
+
+    plain = case([{"action": "not_a_request"}])
+    with_image = case([{"action": "not_a_request"}], recent_image="crash-dialog.png")
+    assert look_candidate(plain, FIXTURE) is None
+    assert "image" not in dict(context_for(plain, FIXTURE))["recent_messages"]
+    candidate = look_candidate(with_image, FIXTURE)
+    assert candidate is not None
+    blocks = dict(context_for(with_image, FIXTURE))
+    assert "[image, can be looked at]" in blocks["recent_messages"]
+
+
+def test_the_look_back_cases_exist_on_both_sides() -> None:
+    must = [c for c in CASES if c.look is True]
+    must_not = [c for c in CASES if c.look is False]
+    assert len(must) >= 3 and len(must_not) >= 2
+    assert any(c.category == "injection" for c in must + must_not)

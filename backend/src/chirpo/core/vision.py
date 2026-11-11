@@ -13,7 +13,7 @@ from chirpo.core import messages
 from chirpo.core.domain import Attachment, AttachmentKind, InboundMessage
 from chirpo.core.errors import AttachmentTooLargeError, UnsupportedImageError
 from chirpo.core.images import MAX_IMAGE_BYTES, can_read, load_image
-from chirpo.core.llm import IMAGE_OWN, IMAGE_REPLIED, RequestImage
+from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
 from chirpo.core.ports import MessagingAdapter
 
 MAX_IMAGES = 3
@@ -44,6 +44,14 @@ async def gather_images(messaging: MessagingAdapter, message: InboundMessage) ->
     images = tuple(item for item in loaded if isinstance(item, RequestImage))
     notes += [item for item in loaded if isinstance(item, str)]
     return Seen(images, list(dict.fromkeys(notes)))  # each problem once
+
+
+async def gather_recent(messaging: MessagingAdapter, attachment: Attachment) -> Seen:
+    """The most recent image of the chat, which the model asked to see (D52)."""
+    loaded = await _load(messaging, IMAGE_RECENT, attachment)
+    if isinstance(loaded, RequestImage):
+        return Seen((loaded,), [])
+    return Seen((), [loaded])
 
 
 async def _load(

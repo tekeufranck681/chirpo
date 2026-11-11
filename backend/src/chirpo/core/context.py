@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from chirpo.core.actions import unsafe_char
-from chirpo.core.domain import Issue, RecentMessage, RepoRef
+from chirpo.core.domain import AttachmentKind, Issue, RecentMessage, RepoRef
+from chirpo.core.images import can_read
 from chirpo.core.workspaces import LinkedRepo, Member
 
 MAX_MEMBERS = 50
@@ -37,17 +38,25 @@ def default_of(repos: Sequence[LinkedRepo]) -> RepoRef:
 
 
 def context_blocks(
-    team: Team, *, recent: Sequence[RecentMessage], replied: RecentMessage | None
+    team: Team,
+    *,
+    recent: Sequence[RecentMessage],
+    replied: RecentMessage | None,
+    media: bool = False,
+    look_at: str | None = None,
 ) -> list[Block]:
+    """`media`: say which messages came with files; `look_at`: the message whose image chirpo
+    can look at if the request refers to it (D52)."""
     blocks: list[Block] = [
         ("team_members", "\n".join(_member(m) for m in team.members[:MAX_MEMBERS])),
         ("linked_repos", "\n".join(_repo(link) for link in team.repos)),
         ("open_issues", "\n".join(_issue(i) for i in team.open_issues[:MAX_ISSUES]) or "none"),
     ]
     if recent:
-        blocks.append(("recent_messages", "\n".join(_said(m) for m in recent)))
+        said = "\n".join(_said(m, media=media, look_at=look_at) for m in recent)
+        blocks.append(("recent_messages", said))
     if replied is not None:
-        blocks.append(("replied_message", _said(replied)))
+        blocks.append(("replied_message", _said(replied, media=media)))
     return blocks
 
 
@@ -71,9 +80,28 @@ def _issue(issue: Issue) -> str:
     return clean(f"#{issue.number} {issue.title}{suffix}", MAX_ISSUE_LINE)
 
 
-def _said(message: RecentMessage) -> str:
+def _said(message: RecentMessage, *, media: bool = False, look_at: str | None = None) -> str:
     name = clean(message.sender.display_name, MAX_NAME)
-    return clean(f"[{message.sent_at:%H:%M}] {name}: {message.text}", MAX_MESSAGE_LINE)
+    shown = " ".join(_media(message, look_at)) if media else ""
+    body = f"{shown} {message.text}".strip() if shown else message.text
+    return clean(f"[{message.sent_at:%H:%M}] {name}: {body}", MAX_MESSAGE_LINE).rstrip()
+
+
+def _media(message: RecentMessage, look_at: str | None) -> list[str]:
+    """One marker per file, written by us from what the platform says, never from the text."""
+    markers, lookable = [], message.message_id == look_at
+    for attachment in message.attachments:
+        if attachment.kind is AttachmentKind.IMAGE:
+            if lookable and can_read(attachment):
+                markers.append("[image, can be looked at]")
+                lookable = False  # the first readable one is the one chirpo would fetch
+            else:
+                markers.append("[image]")
+        elif attachment.kind is AttachmentKind.VOICE:
+            markers.append("[voice message]")
+        else:
+            markers.append("[file]")
+    return markers
 
 
 def clean(text: str, limit: int) -> str:
