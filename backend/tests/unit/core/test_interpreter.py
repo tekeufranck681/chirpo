@@ -27,12 +27,14 @@ from chirpo.core.errors import (
 )
 from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import handle_inbound
+from chirpo.core.ratelimit import Limits, RateLimiter
 from chirpo.core.workspaces import CodeHostAccount
 from tests.fakes import (
     CHAT,
     USER,
     FakeAuditLog,
     FakeCodeHost,
+    FakeCounters,
     FakeLLM,
     FakeMembers,
     FakeMessageBuffer,
@@ -432,3 +434,96 @@ async def test_a_github_failure_stops_the_other_lookups() -> None:
     await asyncio.sleep(0.1)
     assert finished == []
     assert world.messaging.sent[-1][1] == messages.GITHUB_TROUBLE
+
+
+NOON = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
+
+
+def limited(world: "World", *, member: int = 0, team: int = 0, tokens: int = 0) -> FakeCounters:
+    counters = FakeCounters()
+    limits = Limits(member, team, tokens, 0)
+    rates = RateLimiter(counters, limits, now=lambda: NOON)
+    world.services = replace(world.services, limits=rates)
+    return counters
+
+
+async def test_a_person_over_the_limit_is_told_once_and_the_model_is_not_called() -> None:
+    world = World([CHECKOUT], [CHECKOUT])
+    await world.linked()
+    limited(world, member=2)
+    await world.say("checkout crashes on Android 13")
+    await world.say("checkout crashes on Android 13")
+    reply = await world.say("checkout crashes on Android 13")
+    assert reply == messages.RATE_LIMITED_MEMBER.format(wait="1 hour")
+    assert len(world.llm.requests) == 2
+    assert await world.say("checkout crashes on Android 13") == ""  # not told again
+
+
+async def test_the_team_limit_applies_to_everyone() -> None:
+    world = World([CHECKOUT], [CHECKOUT])
+    await world.linked()
+    world.codehost.permissions[(SANDBOX.key, "annie-gh")] = RepoPermission.READ
+    limited(world, member=5, team=2)
+    await world.say("checkout crashes")
+    await world.say("checkout crashes", sender=ANNIE)
+    reply = await world.say("checkout crashes")
+    assert reply == messages.RATE_LIMITED_TEAM.format(wait="1 hour")
+    assert len(world.llm.requests) == 2
+
+
+async def test_a_refused_request_reads_nothing_from_github() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    limited(world, member=1)
+    reads: list[object] = []
+    list_issues = world.codehost.list_issues
+
+    async def counted(*args: object, **kwargs: object) -> object:
+        reads.append(args)
+        return await list_issues(*args, **kwargs)  # type: ignore[arg-type]
+
+    world.codehost.list_issues = counted  # type: ignore[method-assign]
+    await world.say("checkout crashes")
+    assert len(reads) == 1
+    await world.say("checkout crashes")
+    assert len(reads) == 1
+    assert len(world.llm.requests) == 1
+
+
+async def test_someone_who_hasnt_linked_github_uses_no_allowance() -> None:
+    world = World()
+    await world.linked(verified=False)
+    counters = limited(world, member=1)
+    assert await world.say("checkout crashes") == messages.LINK_GITHUB_FIRST
+    assert counters.values == {}
+
+
+async def test_tokens_count_toward_the_daily_budget() -> None:
+    world = World([CHECKOUT], [CHECKOUT])
+    world.llm = FakeLLM([CHECKOUT], [CHECKOUT], tokens=(5_800, 200))
+    world.services = replace(world.services, llm=world.llm)
+    await world.linked()
+    limited(world, tokens=10_000)
+    await world.say("checkout crashes")  # 6,000 used
+    await world.say("checkout crashes")  # 12,000 used: the model was still asked
+    reply = await world.say("checkout crashes")
+    assert reply == messages.RATE_LIMITED_BUDGET.format(wait="12 hours")
+    assert len(world.llm.requests) == 2
+
+
+async def test_commands_are_not_limited() -> None:
+    world = World()
+    await world.linked()
+    limited(world, member=1, team=1)
+    for _ in range(3):
+        assert await world.say("/ping") == messages.PONG
+
+
+async def test_a_failed_refusal_reply_does_not_break_the_request() -> None:
+    world = World([CHECKOUT], [CHECKOUT])
+    await world.linked()
+    limited(world, member=1)
+    await world.say("checkout crashes")
+    world.messaging.unreachable_chats = {CHAT.chat_id}
+    await world.say("checkout crashes")  # the refusal can't be delivered: no error
+    assert len(world.llm.requests) == 1

@@ -9,6 +9,7 @@ from chirpo.adapters.codehost.github.auth import GitHubAuth
 from chirpo.adapters.codehost.github.device import GitHubDeviceLogin
 from chirpo.adapters.llm import llm_from_settings
 from chirpo.adapters.messaging.connect import connect_messaging
+from chirpo.adapters.ratelimit.redis import RedisCounters
 from chirpo.config import Settings, get_settings
 from chirpo.core.commands import Services
 from chirpo.core.errors import CodeHostError
@@ -16,6 +17,7 @@ from chirpo.core.identity import IdentityLinking
 from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
+from chirpo.core.ratelimit import Limits, RateLimiter
 from chirpo.db.repositories import (
     SqlAuditLog,
     SqlMembers,
@@ -141,6 +143,15 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         buffer=ctx["buffer"] if settings.message_buffer_hours else None,
         context_hours=settings.message_buffer_hours,
         llm=llm_from_settings(settings, client=ctx["http"]),
+        limits=RateLimiter(
+            RedisCounters(ctx["redis"]),
+            Limits(
+                llm_per_member_hour=settings.llm_calls_per_member_hour,
+                llm_per_workspace_hour=settings.llm_calls_per_workspace_hour,
+                llm_tokens_per_day=settings.llm_tokens_per_day,
+                github_writes_per_member_hour=settings.github_writes_per_member_hour,
+            ),
+        ),
     )
 
 

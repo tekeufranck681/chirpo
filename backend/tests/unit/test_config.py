@@ -131,3 +131,20 @@ def test_llm_thinking_level() -> None:
     assert make_settings(llm_thinking="minimal").llm_thinking == "minimal"
     with pytest.raises(ValidationError):
         make_settings(llm_thinking="lots")
+
+
+def test_rate_limit_defaults_and_bounds() -> None:
+    settings = make_settings()
+    assert settings.llm_calls_per_member_hour == 30
+    assert settings.llm_calls_per_workspace_hour == 120
+    assert settings.llm_tokens_per_day == 0  # off: the provider's own quota stops first
+    assert settings.github_writes_per_member_hour == 30
+    assert make_settings(llm_calls_per_member_hour=0).llm_calls_per_member_hour == 0
+    for name in (
+        "llm_calls_per_member_hour",
+        "llm_calls_per_workspace_hour",
+        "llm_tokens_per_day",
+        "github_writes_per_member_hour",
+    ):
+        with pytest.raises(ValidationError):
+            make_settings(**{name: -1})

@@ -23,6 +23,10 @@ class MessagingUnavailableError(MessagingError):
     """Network problem or platform outage; retrying later may succeed."""
 
 
+class CountersUnavailableError(Exception):
+    """The store behind the rate limits can't be reached."""
+
+
 class CodeHostError(Exception):
     """A code host call failed."""
 

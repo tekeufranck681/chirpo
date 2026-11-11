@@ -463,3 +463,22 @@ async def test_no_notice_on_link_when_the_instance_keeps_nothing(world: World) -
 async def test_help_and_about_mention_context() -> None:
     assert "/context" in messages.HELP
     assert "/context" in messages.ABOUT
+
+
+async def test_issue_creation_is_limited_per_person(world: World) -> None:
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from chirpo.core.ratelimit import Limits, RateLimiter
+    from tests.fakes import FakeCounters
+
+    await linked_by_annie(world)
+    noon = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
+    rates = RateLimiter(FakeCounters(), Limits(0, 0, 0, 2), now=lambda: noon)
+    world.services = replace(world.services, limits=rates)
+
+    await world.say("/issue One")
+    await world.say("/issue Two")
+    assert await world.say("/issue Three") == messages.WRITE_LIMITED.format(wait="1 hour")
+    assert await world.say("/issue Four") == ""
+    assert len(world.codehost.issues) == 2

@@ -205,6 +205,16 @@ class LLMProvider(Protocol):
         ...
 
 
+class Counters(Protocol):
+    """Counters that expire by themselves, for rate limits. Raises `CountersUnavailableError`."""
+
+    async def add(self, key: str, amount: int, ttl: int) -> int:
+        """Adds to the counter, which disappears `ttl` seconds later. Returns the new total."""
+        ...
+
+    async def get(self, key: str) -> int: ...
+
+
 class MessageBuffer(Protocol):
     """Recent chat messages kept for context, encrypted, for a limited time (D46)."""
 
