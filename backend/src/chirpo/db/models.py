@@ -230,6 +230,13 @@ class PendingAction(IdMixin, TimestampsMixin, WorkspaceScopedMixin, Base):
             ["members.workspace_id", "members.id"],
             ondelete="CASCADE",
         ),
+        # Replies to a card find its proposal by the message the card is on.
+        Index(
+            "ix_pending_actions_workspace_id_chat_id_message_id",
+            "workspace_id",
+            "chat_id",
+            "message_id",
+        ),
         # For the sweep that expires old proposals, across workspaces: only open ones are indexed.
         Index(
             "ix_pending_actions_expires_at",

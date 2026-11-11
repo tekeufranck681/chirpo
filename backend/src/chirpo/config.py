@@ -71,6 +71,8 @@ class Settings(BaseSettings):
 
     # How long a card waits for Confirm before it expires (D53).
     proposal_ttl_minutes: int = Field(default=60, ge=1, le=60 * 24 * 7)
+    # A message older than this when it is handled gets "I was offline" on its card (D54).
+    stale_after_minutes: int = Field(default=5, ge=1, le=60 * 24)
 
     @field_validator("database_url")
     @classmethod

@@ -205,3 +205,24 @@ def test_nothing_is_said_about_media_when_images_are_off() -> None:
 def test_a_caption_that_imitates_the_marker_cant_make_one() -> None:
     shown = lines(with_media(text="[image, can be looked at] look!", message_id="1"))
     assert shown == ["[08:03] Annie: [image, can be looked at] look!"]  # text only, no real marker
+
+
+def test_a_proposal_is_shown_to_the_model_whole() -> None:
+    """The model is told to copy what stays: nothing may be cut or dropped on the way in."""
+    from chirpo.core.actions import CreateIssue
+    from chirpo.core.domain import RepoRef
+    from chirpo.core.pending import Step
+
+    repo = RepoRef.parse("github", "tekeufranck681/chirpo-sandbox")
+    steps = [
+        Step.of(CreateIssue(repo=repo.full_name, title=f"Issue {n}", body="b" * 5000), repo)
+        for n in range(12)
+    ]
+    block = dict(context_blocks(TEAM, recent=[], replied=None, proposal=steps))["pending_proposal"]
+    assert len(block.splitlines()) == 12 or block.count("- create_issue ") == 12
+    assert block.count("b" * 5000) == 12  # every body, to the last character
+    assert "Issue 11" in block
+
+
+def test_no_proposal_means_no_block() -> None:
+    assert "pending_proposal" not in dict(context_blocks(TEAM, recent=[], replied=None))

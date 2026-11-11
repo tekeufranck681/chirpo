@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
 from chirpo.core import messages
-from chirpo.core.actions import permission_of
+from chirpo.core.actions import permission_of, spec_of
 from chirpo.core.commands.base import (
     Actor,
     Request,
@@ -27,8 +27,16 @@ from chirpo.core.commands.base import (
     limited,
     needs_services,
 )
-from chirpo.core.confirmation import propose
-from chirpo.core.context import MAX_ISSUES, Block, Team, context_blocks, default_of
+from chirpo.core.confirmation import may_decide, propose
+from chirpo.core.context import (
+    MAX_ISSUES,
+    MAX_PROPOSAL_CHARS,
+    Block,
+    Team,
+    context_blocks,
+    default_of,
+    proposal_size,
+)
 from chirpo.core.domain import Attachment, AuditResult, IssueQuery, RecentMessage, RepoRef
 from chirpo.core.errors import (
     CodeHostError,
@@ -42,9 +50,10 @@ from chirpo.core.listing import is_read, run_read
 from chirpo.core.llm import Interpretation, RequestImage
 from chirpo.core.lookback import Asked, Charge, recent_image
 from chirpo.core.lookback import interpret as ask_with_lookback
+from chirpo.core.pending import PendingAction, PendingStatus
 from chirpo.core.permissions import Action
 from chirpo.core.ports import LLMProvider
-from chirpo.core.resolution import Question, resolve
+from chirpo.core.resolution import Question, Resolved, resolve
 from chirpo.core.vision import Seen, gather_images, gather_recent
 from chirpo.core.workspaces import LinkedRepo
 
@@ -72,6 +81,9 @@ async def interpret(request: Request) -> None:
         await request.reply(messages.LINK_GITHUB_FIRST)
         return
 
+    card, answered = await _card_replied_to(request, actor)  # a reply to a card: no model needed
+    if answered:
+        return
     if services.limits is not None:  # before anything is read or paid for
         verdict = await services.limits.check_llm(actor.workspace.id, actor.member.id)
         if await limited(request, verdict):
@@ -81,7 +93,7 @@ async def interpret(request: Request) -> None:
     if not await allowed(request, actor, Action.VIEW, default):
         return
     async with _typing(request):
-        await _answer(request, actor, services.llm, repos)
+        await _answer(request, actor, services.llm, repos, card)
 
 
 class _Timer:
@@ -102,12 +114,48 @@ class _Timer:
         log.info("request_interpreted %s total_ms=%d", steps, total)
 
 
+CREATES = frozenset({"create_issue", "create_issues"})
+
+
+def _loses_the_new_issues(card: PendingAction, changes: Sequence[Resolved]) -> bool:
+    """A card that creates issues, answered by steps that create none: the model took "it" for
+    an issue already on GitHub (the card's issues aren't there yet), so the answer would drop
+    what the card was for. The card is left as it is."""
+    if not any(step.action in CREATES for step in card.steps):
+        return False
+    return not any(spec_of(step.proposal).name in CREATES for step in changes)
+
+
+async def _card_replied_to(request: Request, actor: Actor) -> tuple[PendingAction | None, bool]:
+    """The waiting card this message replies to, if the sender may change it (M5.3); and whether
+    the reply was already answered. A card that was handled or ran out of time is just context
+    the sender replied to: what they write is an ordinary request, never swallowed."""
+    message, services = request.message, actor.services
+    if not (message.replies_to_bot and message.reply_to_message_id):
+        return None, False
+    row = await services.pending.find_by_card(
+        actor.workspace.id, message.chat, message.reply_to_message_id
+    )
+    if row is None or not may_decide(actor.member, row):
+        return None, False  # not one of our cards, or not theirs to change
+    if row.status != PendingStatus.PROPOSED or row.is_expired(services.now()):
+        return None, False
+    if proposal_size(row.steps) > MAX_PROPOSAL_CHARS:
+        await request.reply(messages.TOO_BIG_TO_CHANGE)  # never show the model half a proposal
+        return None, True
+    return row, False
+
+
 async def _answer(
-    request: Request, actor: Actor, llm: LLMProvider, repos: Sequence[LinkedRepo]
+    request: Request,
+    actor: Actor,
+    llm: LLMProvider,
+    repos: Sequence[LinkedRepo],
+    replacing: PendingAction | None,
 ) -> None:
     timer = _Timer()
     try:
-        await _answer_timed(request, actor, llm, repos, timer)
+        await _answer_timed(request, actor, llm, repos, timer, replacing)
     except BaseException:
         timer.lap("failed")  # the step that was running
         raise
@@ -116,7 +164,12 @@ async def _answer(
 
 
 async def _answer_timed(
-    request: Request, actor: Actor, llm: LLMProvider, repos: Sequence[LinkedRepo], timer: _Timer
+    request: Request,
+    actor: Actor,
+    llm: LLMProvider,
+    repos: Sequence[LinkedRepo],
+    timer: _Timer,
+    replacing: PendingAction | None,
 ) -> None:
     services, default = actor.services, default_of(repos)
     try:  # at the same time; the first failure cancels the others
@@ -150,6 +203,7 @@ async def _answer_timed(
             replied=replied,
             media=services.read_images,
             look_at=look.message_id if look else None,
+            proposal=replacing.steps if replacing else None,
         ),
         images=seen.images,
         candidate=look.attachment if look else None,
@@ -188,6 +242,8 @@ async def _answer_timed(
         return
     if not result:
         nothing = messages.NOT_A_REQUEST.format(bot=request.messaging.bot_mention())
+        if replacing is not None:  # "ok, looks good": only the buttons confirm
+            nothing = messages.USE_THE_BUTTONS
         await request.reply(_with_notes(nothing, notes))
         return
     for step in result:
@@ -207,8 +263,13 @@ async def _answer_timed(
         await request.reply(
             "\n\n".join(parts) if changes else _with_notes("\n\n".join(parts), notes)
         )
+    if changes and replacing is not None and _loses_the_new_issues(replacing, changes):
+        await request.reply(messages.CARD_UNCHANGED)  # the card stays, to confirm or cancel
+        return
     if changes:
-        await propose(request, actor.member, services, changes, default, notes)
+        if services.now() - request.message.sent_at > services.stale_after:
+            notes = [*notes, messages.STALE_NOTE]  # the worker was away: don't act on old words
+        await propose(request, actor.member, services, changes, default, notes, replacing)
     timer.lap("reply")
 
 

@@ -42,11 +42,16 @@ async def propose(
     steps: Sequence[Resolved],
     default_repo: RepoRef,
     notes: Sequence[str] = (),
+    replaces: PendingAction | None = None,
 ) -> None:
-    """Stores the steps and posts the card, as a reply to the request."""
+    """Stores the steps and posts the card, as a reply to the request. With `replaces`, the card
+    it changes is retired first: only one of the two can ever be confirmed. If the new card can't
+    be posted, the old one is given back."""
     message = request.message
     name = clean(asker.display_name, MAX_NAME)
     footer = [messages.CONFIRM_FOOTER.format(name=name), *notes]
+    if replaces is not None:
+        footer.append(messages.REPLACES_NOTE)
     for limit in (MAX_TEXT, SHORT_TEXT):  # long bodies are shortened before anything is dropped
         text = "\n\n".join([describe(steps, default_repo, limit), *footer])
         if len(text) <= MAX_CARD:
@@ -54,23 +59,105 @@ async def propose(
     else:  # the person must see every step they confirm: too many to show means too many to ask
         await request.reply(messages.TOO_BIG)
         return
-    pending = await services.pending.create(
-        workspace_id=asker.workspace_id,
-        requested_by=asker.id,
-        chat=message.chat,
-        steps=[Step.of(step.proposal, step.repo) for step in steps],
-        expires_at=services.now() + services.proposal_ttl,
+    if replaces is not None and not await _retire(services, replaces):
+        await request.reply(await _why_not(services, replaces))
+        return
+    pending: PendingAction | None = None
+    try:
+        pending = await services.pending.create(
+            workspace_id=asker.workspace_id,
+            requested_by=asker.id,
+            chat=message.chat,
+            steps=[Step.of(step.proposal, step.repo) for step in steps],
+            expires_at=services.now() + services.proposal_ttl,
+        )
+        sent = await request.messaging.send_message(
+            message.chat,
+            text,
+            reply_to=message.message_id,
+            buttons=[
+                Button(text=messages.BUTTON_CONFIRM, data=f"{CONFIRM}:{pending.id}"),
+                Button(text=messages.BUTTON_CANCEL, data=f"{CANCEL}:{pending.id}"),
+            ],
+        )
+        await services.pending.attach_message(asker.workspace_id, pending.id, sent.message_id)
+    except BaseException:
+        await asyncio.shield(_undo(services, replaces, pending))
+        raise
+    if replaces is not None:
+        await _finish_replace(request, services, asker, replaces, pending)
+
+
+async def _retire(services: Services, old: PendingAction) -> bool:
+    moved = await services.pending.advance(
+        old.workspace_id,
+        old.id,
+        expect=PendingStatus.PROPOSED,
+        to=PendingStatus.MODIFIED,
+        now=services.now(),
     )
-    sent = await request.messaging.send_message(
-        message.chat,
-        text,
-        reply_to=message.message_id,
-        buttons=[
-            Button(text=messages.BUTTON_CONFIRM, data=f"{CONFIRM}:{pending.id}"),
-            Button(text=messages.BUTTON_CANCEL, data=f"{CANCEL}:{pending.id}"),
-        ],
+    return moved is not None
+
+
+async def _why_not(services: Services, row: PendingAction) -> str:
+    """Why a card can't be changed any more, in the words a button press would get."""
+    current = await services.pending.get(row.workspace_id, row.id)
+    if current is None:
+        return messages.CB_UNAVAILABLE
+    if current.status == PendingStatus.PROPOSED:
+        return messages.CB_EXPIRED  # still waiting, so only the clock can have stopped it
+    return note_for(current.status)
+
+
+async def _undo(services: Services, old: PendingAction | None, new: PendingAction | None) -> None:
+    """The new card never reached the chat: nobody can use it, and the old one is theirs again.
+    Best effort: whatever fails here must not hide the error that got us here."""
+    now = services.now()
+    if new is not None:
+        with suppress(Exception):
+            await services.pending.advance(
+                new.workspace_id,
+                new.id,
+                expect=PendingStatus.PROPOSED,
+                to=PendingStatus.REJECTED,
+                now=now,
+            )
+    if old is not None:
+        with suppress(Exception):
+            await services.pending.advance(
+                old.workspace_id,
+                old.id,
+                expect=PendingStatus.MODIFIED,
+                to=PendingStatus.PROPOSED,
+                now=now,
+            )
+
+
+async def _finish_replace(
+    request: Request,
+    services: Services,
+    asker: Member,
+    old: PendingAction,
+    new: PendingAction,
+) -> None:
+    """The old card says it was replaced, and the change is on record (who, which, whose)."""
+    if old.message_id is not None:
+        card = SentMessage(chat=old.chat, message_id=old.message_id)
+        with suppress(MessagingError):
+            await request.messaging.edit_message(card, messages.REPLACED)
+    await services.audit.record(
+        AuditEntry(
+            workspace_id=asker.workspace_id,
+            actor_member_id=asker.id,
+            action="modify_proposal",
+            result=AuditResult.EXECUTED,
+            payload={
+                "replaced": str(old.id),
+                "by": str(new.id),
+                "original_asker": str(old.requested_by),
+            },
+        )
     )
-    await services.pending.attach_message(asker.workspace_id, pending.id, sent.message_id)
 
 
 async def handle_callback(
@@ -93,7 +180,7 @@ async def handle_callback(
         await press.answer(messages.CB_UNAVAILABLE)
         return
     if row.status != PendingStatus.PROPOSED:
-        await press.answer(_note_for(row.status))
+        await press.answer(note_for(row.status))
         return
     members = await services.members.all(workspace.id)
     presser = await services.members.for_chat_user(workspace.id, event.sender)
@@ -101,7 +188,7 @@ async def handle_callback(
     if asker is None:
         await press.answer(messages.CB_UNAVAILABLE)
         return
-    if presser.id != asker.id and not presser.role.at_least(Role.MAINTAINER):
+    if not may_decide(presser, row):
         name = clean(asker.display_name, MAX_NAME)
         await press.answer(messages.CB_NOT_ALLOWED.format(name=name))
         return
@@ -193,7 +280,7 @@ class _Handling:
         if row is not None and row.status == PendingStatus.PROPOSED:
             await self.expire()  # nobody took it, so it must have expired just now
             return
-        await self.press.answer(_note_for(row.status) if row else messages.CB_UNAVAILABLE)
+        await self.press.answer(note_for(row.status) if row else messages.CB_UNAVAILABLE)
 
     async def _crashed(self) -> None:
         for expect in (PendingStatus.EXECUTING, PendingStatus.CONFIRMED):
@@ -232,7 +319,12 @@ class _Handling:
         )
 
 
-def _note_for(status: PendingStatus) -> str:
+def may_decide(member: Member, row: PendingAction) -> bool:
+    """Who may confirm, cancel or change a card: the person who asked, or a maintainer."""
+    return member.id == row.requested_by or member.role.at_least(Role.MAINTAINER)
+
+
+def note_for(status: PendingStatus) -> str:
     """What to tell someone who pressed a button whose request isn't waiting for an answer."""
     match status:
         case PendingStatus.EXPIRED:

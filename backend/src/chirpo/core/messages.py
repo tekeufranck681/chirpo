@@ -160,6 +160,15 @@ RUNNING = "⏳ Working on it…"
 CANCELLED = "Cancelled by {name}."
 REQUESTED_BY = ISSUE_BODY
 EXPIRED = "This request expired. Ask me again."
+REPLACED = "Replaced by a newer proposal below."
+USE_THE_BUTTONS = "Use Confirm or Cancel on the card to go ahead, or tell me what to change."
+CARD_UNCHANGED = (
+    "I wasn't sure how to change that card, so I left it as it is. "
+    'Tell me what to change, for example "assign it to me".'
+)
+TOO_BIG_TO_CHANGE = "That card is too big to change by reply. Cancel it and ask again."
+REPLACES_NOTE = "This replaces the earlier proposal."
+STALE_NOTE = "I was offline when you sent this. Check it is still what you want before confirming."
 CB_UNAVAILABLE = "That request isn't available any more."
 CB_ALREADY = "That request was already handled."
 CB_RUNNING = "Already on it."

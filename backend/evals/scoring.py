@@ -29,6 +29,7 @@ from chirpo.core.domain import (
 )
 from chirpo.core.images import sniff
 from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
+from chirpo.core.pending import Step as PendingStep
 from chirpo.core.permissions import Action, Role
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
 
@@ -78,6 +79,8 @@ class Case:
     recent_image: str | None = None
     recent_image_text: str = ""
     look: bool | None = None
+    # The message replies to a card (M5.3) that proposes these steps (stored as they would be).
+    pending: tuple[PendingStep, ...] = ()
 
 
 @dataclass
@@ -145,6 +148,7 @@ def context_for(case: Case, fixture: Fixture) -> list[Block]:
         replied=replied,
         media=candidate is not None,
         look_at=RECENT_IMAGE_ID if candidate else None,
+        proposal=case.pending or None,
     )
 
 
@@ -394,7 +398,26 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         recent_image=recent_image,
         recent_image_text=raw.get("recent_image_text", ""),
         look=raw.get("look"),
+        pending=_pending_steps(raw.get("pending", ()), fx, raw["id"]),
     )
+
+
+def _pending_steps(
+    raw: Sequence[Mapping[str, Any]], fx: Fixture, case_id: str
+) -> tuple[PendingStep, ...]:
+    """The card's steps as the interpreter stores them: validated, in the default repo."""
+    repo = fx.team.default_repo
+    steps = []
+    for entry in raw:
+        fields = {key: value for key, value in entry.items() if key != "action"}
+        try:
+            proposal = ACTIONS[entry["action"]].model.model_validate(
+                {"repo": repo.full_name, **fields}
+            )
+        except (KeyError, ValueError) as error:
+            raise ValueError(f"case {case_id}: bad card step {dict(entry)}") from error
+        steps.append(PendingStep.of(proposal, repo))
+    return tuple(steps)
 
 
 def _repo(full_name: str) -> RepoRef:
