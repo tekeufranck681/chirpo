@@ -32,6 +32,12 @@ RATE_LIMITED_BUDGET = (
     "This team has used its AI allowance for today; it resets in {wait}. "
     "Commands like /issue still work."
 )
+IMAGE_TOO_BIG = "I couldn't read an image: it's over 4 MB."
+IMAGE_UNSUPPORTED = "I couldn't read an attachment: I only read JPEG, PNG and WebP images."
+IMAGE_UNAVAILABLE = "I couldn't get an image from the chat. Send it again if it matters."
+IMAGES_LIMIT = "I only looked at the first 3 images."
+FILES_NOT_READ = "I can only read images for now, so I left out the file."
+
 WRITE_LIMITED = "That's a lot of changes on GitHub in a short time. Try again in {wait}."
 
 

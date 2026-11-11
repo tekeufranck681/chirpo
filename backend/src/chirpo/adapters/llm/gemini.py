@@ -9,6 +9,7 @@ typed `LLMError`, never as a crash in the worker.
 """
 
 import asyncio
+import base64
 import math
 import re
 from collections.abc import Awaitable, Callable
@@ -155,9 +156,16 @@ def _body(request: InterpretRequest, thinking: str | None) -> dict[str, Any]:
     config: dict[str, Any] = {"maxOutputTokens": MAX_OUTPUT_TOKENS}
     if thinking is not None:
         config["thinkingConfig"] = {"thinkingLevel": thinking}
+    # Google advises images before the text that asks about them.
+    parts: list[dict[str, Any]] = []
+    for image in request.images:
+        data = base64.b64encode(image.data).decode("ascii")
+        parts.append({"text": image.label})
+        parts.append({"inlineData": {"mimeType": image.mime_type, "data": data}})
+    parts.append({"text": request.message})
     return {
         "systemInstruction": {"parts": [{"text": request.instructions}]},
-        "contents": [{"role": "user", "parts": [{"text": request.message}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "tools": [{"functionDeclarations": declarations}],
         "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
         "generationConfig": config,

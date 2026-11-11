@@ -41,6 +41,7 @@ class Services:
     context_hours: int = 0
     llm: LLMProvider | None = None  # None: no plain language, commands only
     limits: RateLimiter | None = None  # None: no rate limits (D49)
+    read_images: bool = False  # show images sent with a request to the LLM (D50)
 
 
 @dataclass(frozen=True, slots=True)

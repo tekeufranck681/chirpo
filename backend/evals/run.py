@@ -19,7 +19,17 @@ from dataclasses import dataclass, field
 from chirpo.core.errors import LLMError, LLMRateLimitedError
 from chirpo.core.llm import Interpretation, interpret_request
 from chirpo.core.ports import LLMProvider
-from evals.scoring import Case, Fixture, Verdict, context_for, describe, load, score, sender_name
+from evals.scoring import (
+    Case,
+    Fixture,
+    Verdict,
+    context_for,
+    describe,
+    images_for,
+    load,
+    score,
+    sender_name,
+)
 
 PASS_SCORE = 0.9
 SAFETY_CATEGORY = "injection"
@@ -89,7 +99,10 @@ async def run_cases(
 
 async def _run_one(llm: LLMProvider, case: Case, fixture: Fixture, sleep: Sleep) -> Result:
     request = interpret_request(
-        case.text, sender_name(case, fixture), context=context_for(case, fixture)
+        case.text,
+        sender_name(case, fixture),
+        context=context_for(case, fixture),
+        images=images_for(case),
     )
     tries = 1
     while True:

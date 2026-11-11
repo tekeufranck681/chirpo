@@ -553,3 +553,129 @@ async def test_a_photo_with_a_caption_is_handled_like_any_request() -> None:
     reply = await world.say("checkout crashes on Android 13", attachments=(photo,))
     assert reply.startswith(messages.DRY_RUN_HEADER)
     assert len(world.llm.requests) == 1
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+SHOT = Attachment(kind=AttachmentKind.IMAGE, file_id="SHOT", mime_type="image/png", size=1000)
+FROM_ANNIE = Attachment(
+    kind=AttachmentKind.IMAGE, file_id="ANNIE", mime_type="image/jpeg", size=900
+)
+
+
+def seeing(world: "World") -> None:
+    world.services = replace(world.services, read_images=True)
+
+
+async def test_the_image_sent_with_the_request_reaches_the_model() -> None:
+    from chirpo.core.llm import IMAGE_OWN
+
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files["SHOT"] = PNG
+    reply = await world.say("make an issue for this", attachments=(SHOT,))
+    [image] = world.llm.requests[0].images
+    assert (image.label, image.mime_type, image.data) == (IMAGE_OWN, "image/png", PNG)
+    assert reply.startswith(messages.DRY_RUN_HEADER)
+    assert world.messaging.downloads == [("SHOT", 4 * 1024 * 1024)]
+
+
+async def test_the_photo_being_replied_to_reaches_the_model() -> None:
+    from chirpo.core.llm import IMAGE_REPLIED
+
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files["ANNIE"] = JPEG
+    await world.say("make an issue for this", reply_to_attachments=(FROM_ANNIE,))
+    [image] = world.llm.requests[0].images
+    assert (image.label, image.mime_type) == (IMAGE_REPLIED, "image/jpeg")
+
+
+async def test_nothing_is_downloaded_when_reading_images_is_switched_off() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    world.messaging.files["SHOT"] = PNG  # read_images stays off
+    reply = await world.say("checkout crashes on Android 13", attachments=(SHOT,))
+    assert world.llm.requests[0].images == ()
+    assert world.messaging.downloads == []
+    assert messages.IMAGE_UNAVAILABLE not in reply
+
+
+async def test_an_unreadable_image_is_said_and_the_text_is_still_used() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    svg = Attachment(kind=AttachmentKind.IMAGE, file_id="S", mime_type="image/svg+xml", size=90)
+    reply = await world.say("checkout crashes on Android 13", attachments=(svg,))
+    assert world.llm.requests[0].images == ()
+    assert reply.startswith(messages.DRY_RUN_HEADER)
+    assert reply.endswith(messages.IMAGE_UNSUPPORTED)
+
+
+async def test_the_note_also_comes_with_a_question() -> None:
+    world = World([AskClarifyingQuestion(question="Which issue?")])
+    await world.linked()
+    seeing(world)
+    voice = Attachment(kind=AttachmentKind.VOICE, file_id="V", mime_type="audio/ogg", size=10)
+    reply = await world.say("move it to done", attachments=(voice,))
+    assert reply == f"Which issue?\n\n{messages.FILES_NOT_READ}"
+
+
+async def test_a_failing_download_never_breaks_the_request() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)  # no bytes for SHOT: the platform "no longer has" it
+    reply = await world.say("checkout crashes on Android 13", attachments=(SHOT,))
+    assert reply.startswith(messages.DRY_RUN_HEADER)
+    assert reply.endswith(messages.IMAGE_UNAVAILABLE)
+
+
+async def test_the_image_downloads_while_github_is_read() -> None:
+    import asyncio
+
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files["SHOT"] = PNG
+    order: list[str] = []
+    list_issues, download = world.codehost.list_issues, world.messaging.download
+
+    async def slow_issues(*args: object, **kwargs: object) -> object:
+        order.append("issues start")
+        await asyncio.sleep(0.02)
+        order.append("issues end")
+        return await list_issues(*args, **kwargs)  # type: ignore[arg-type]
+
+    async def tracked(*args: object, **kwargs: object) -> bytes:
+        order.append("download")
+        return await download(*args, **kwargs)  # type: ignore[arg-type]
+
+    world.codehost.list_issues = slow_issues  # type: ignore[method-assign]
+    world.messaging.download = tracked  # type: ignore[method-assign]
+    await world.say("make an issue for this", attachments=(SHOT,))
+    assert order.index("download") < order.index("issues end")
+
+
+async def test_an_unexpected_image_failure_costs_neither_the_reply_nor_the_github_reads() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+
+    async def odd(*args: object, **kwargs: object) -> bytes:
+        raise RuntimeError("something odd")
+
+    world.messaging.download = odd  # type: ignore[method-assign]
+    reply = await world.say("checkout crashes on Android 13", attachments=(SHOT,))
+    assert reply.startswith(messages.DRY_RUN_HEADER)
+    assert reply.endswith(messages.IMAGE_UNAVAILABLE)
+
+
+async def test_the_note_also_comes_with_nothing_to_do() -> None:
+    world = World([NotARequest()])
+    await world.linked()
+    seeing(world)
+    voice = Attachment(kind=AttachmentKind.VOICE, file_id="V", mime_type="audio/ogg", size=10)
+    reply = await world.say("thanks!", attachments=(voice,))
+    assert reply.endswith(messages.FILES_NOT_READ)

@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     # How much the model thinks before answering; unset: the provider's default (D48).
     llm_thinking: LLMThinking | None = None
+    # Images sent with a request are shown to the model (and so to the LLM provider) (D50).
+    read_images: bool = True
 
     # Recent chat messages kept (encrypted) as context for the LLM; 0 keeps none (D46).
     message_buffer_hours: int = Field(default=24, ge=0, le=24 * 30)

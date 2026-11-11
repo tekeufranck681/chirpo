@@ -104,6 +104,40 @@ class TestRequest:
             "thinkingConfig" not in json.loads(route.calls.last.request.content)["generationConfig"]
         )
 
+    async def test_images_go_first_as_labelled_inline_data(
+        self, provider: GeminiProvider, gemini: respx.MockRouter
+    ) -> None:
+        import base64
+
+        from chirpo.core.llm import IMAGE_OWN, IMAGE_REPLIED, RequestImage
+
+        route = gemini.post(URL).respond(json=payload("create_issue"))
+        images = [
+            RequestImage(label=IMAGE_OWN, mime_type="image/png", data=b"\x89PNG-one"),
+            RequestImage(label=IMAGE_REPLIED, mime_type="image/jpeg", data=b"\xff\xd8\xff-two"),
+        ]
+        request = interpret_request("make an issue", "Franck", marker="m7f3a", images=images)
+        await provider.interpret(request)
+
+        [turn] = json.loads(route.calls.last.request.content)["contents"]
+        assert turn["parts"] == [
+            {"text": IMAGE_OWN},
+            {
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(b"\x89PNG-one").decode(),
+                }
+            },
+            {"text": IMAGE_REPLIED},
+            {
+                "inlineData": {
+                    "mimeType": "image/jpeg",
+                    "data": base64.b64encode(b"\xff\xd8\xff-two").decode(),
+                }
+            },
+            {"text": request.message},
+        ]
+
     def test_model_names_are_checked(self) -> None:
         with pytest.raises(LLMSetupError):
             GeminiProvider(KEY, "../files")

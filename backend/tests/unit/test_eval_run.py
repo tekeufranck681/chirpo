@@ -107,3 +107,21 @@ async def test_a_used_up_quota_stops_the_run_and_keeps_what_ran() -> None:
     assert [r.case.id for r in stopped.value.results] == ["thanks"]
     assert stopped.value.not_run == ["evil", "thanks"]
     assert len(llm.requests) == 4  # no call after the quota ran out
+
+
+async def test_a_case_with_an_image_sends_it_to_the_model() -> None:
+    from evals.scoring import images_for
+
+    case = Case(
+        "pic",
+        "image",
+        "annie",
+        "make an issue for this",
+        [[{"action": "not_a_request"}]],
+        image="crash-dialog.png",
+    )
+    llm = FakeLLM([NotARequest()])
+    await run_cases(llm, [case], FIXTURE, sleep=Waits())
+    [sent] = llm.requests[0].images
+    assert sent.mime_type == "image/png"
+    assert sent.data == images_for(case)[0].data

@@ -18,6 +18,7 @@ from chirpo.core.actions import permission_of
 from chirpo.core.commands.base import (
     Actor,
     Request,
+    Services,
     allowed,
     audit,
     find_actor,
@@ -36,10 +37,11 @@ from chirpo.core.errors import (
     MessagingError,
 )
 from chirpo.core.listing import is_read, run_read
-from chirpo.core.llm import Interpretation, interpret_request
+from chirpo.core.llm import Interpretation, RequestImage, interpret_request
 from chirpo.core.permissions import Action
 from chirpo.core.ports import LLMProvider
 from chirpo.core.resolution import Question, resolve
+from chirpo.core.vision import Seen, gather_images
 from chirpo.core.workspaces import LinkedRepo
 
 RECENT_MESSAGES = 20
@@ -120,12 +122,14 @@ async def _answer_timed(
             )
             members = group.create_task(services.members.all(actor.workspace.id))
             conversation = group.create_task(_conversation(request, actor))
+            seen_task = group.create_task(_seen(request, services))
     except ExceptionGroup as failures:
         error = failures.exceptions[0]
         if isinstance(error, CodeHostError):
             await request.reply(messages.GITHUB_TROUBLE)
         raise error from None
     open_issues, (recent, replied) = issues.result(), conversation.result()
+    seen = seen_task.result()
     team = Team(members=members.result(), repos=repos, open_issues=open_issues)
     timer.lap("context")
     interpretation = await _ask_model(
@@ -133,7 +137,10 @@ async def _answer_timed(
         llm,
         request.message.text,
         context=context_blocks(team, recent=recent, replied=replied),
+        images=seen.images,
     )
+    notes = seen.notes
+    del seen  # the image bytes are done with
     timer.lap("model")
     if interpretation is None:
         return
@@ -160,10 +167,11 @@ async def _answer_timed(
     if result is None:  # a repo the sender may not read; they were told
         return
     if isinstance(result, Question):
-        await request.reply(result.text)
+        await request.reply(_with_notes(result.text, notes))
         return
     if not result:
-        await request.reply(messages.NOT_A_REQUEST.format(bot=request.messaging.bot_mention()))
+        nothing = messages.NOT_A_REQUEST.format(bot=request.messaging.bot_mention())
+        await request.reply(_with_notes(nothing, notes))
         return
     for step in result:
         action = permission_of(step.proposal)
@@ -180,7 +188,7 @@ async def _answer_timed(
     changes = [step for step in result if not is_read(step)]
     if changes:
         parts.append(describe(changes, default))
-    await request.reply("\n\n".join(parts))
+    await request.reply(_with_notes("\n\n".join(parts), notes))
     timer.lap("reply")
 
 
@@ -209,6 +217,16 @@ async def _typing(request: Request) -> AsyncIterator[None]:
             await task
 
 
+async def _seen(request: Request, services: Services) -> Seen:
+    if not services.read_images:
+        return Seen((), [])
+    return await gather_images(request.messaging, request.message)
+
+
+def _with_notes(text: str, notes: list[str]) -> str:
+    return "\n\n".join([text, "\n".join(notes)]) if notes else text
+
+
 async def _conversation(
     request: Request, actor: Actor
 ) -> tuple[list[RecentMessage], RecentMessage | None]:
@@ -226,12 +244,17 @@ async def _conversation(
 
 
 async def _ask_model(
-    request: Request, llm: LLMProvider, text: str, *, context: list[Block]
+    request: Request,
+    llm: LLMProvider,
+    text: str,
+    *,
+    context: list[Block],
+    images: Sequence[RequestImage],
 ) -> Interpretation | None:
     """The model's proposals, or None after telling the person why there are none."""
     sender = request.message.sender.display_name
     try:
-        return await llm.interpret(interpret_request(text, sender, context=context))
+        return await llm.interpret(interpret_request(text, sender, context=context, images=images))
     except LLMRateLimitedError:
         await request.reply(messages.LLM_BUSY)
     except LLMRefusedError:
