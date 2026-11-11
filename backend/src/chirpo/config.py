@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     # Recent chat messages kept (encrypted) as context for the LLM; 0 keeps none (D46).
     message_buffer_hours: int = Field(default=24, ge=0, le=24 * 30)
 
+    # Safety nets, not caps on normal use (D49). 0 turns one off.
+    llm_calls_per_member_hour: int = Field(default=30, ge=0)
+    llm_calls_per_workspace_hour: int = Field(default=120, ge=0)
+    llm_tokens_per_day: int = Field(default=0, ge=0)
+    github_writes_per_member_hour: int = Field(default=30, ge=0)
+
     @field_validator("database_url")
     @classmethod
     def _async_postgres_driver(cls, value: str) -> str:

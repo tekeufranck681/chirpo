@@ -1,5 +1,7 @@
 """All user-facing bot text, in one place so it can be translated later."""
 
+import math
+
 PONG = "pong"
 
 HELP = """Hi, I'm chirpo. I turn your team chat into GitHub actions.
@@ -23,6 +25,14 @@ Or just tell me what you need, mentioning me (in a private chat, just write):
 For now I show what I would do; confirming and running it comes soon."""
 
 UNKNOWN_COMMAND = "I don't know that command. Try /help."
+
+RATE_LIMITED_MEMBER = "That's a lot of requests in a short time. Try again in {wait}."
+RATE_LIMITED_TEAM = "This team has sent a lot of requests this hour. Try again in {wait}."
+RATE_LIMITED_BUDGET = (
+    "This team has used its AI allowance for today; it resets in {wait}. "
+    "Commands like /issue still work."
+)
+WRITE_LIMITED = "That's a lot of changes on GitHub in a short time. Try again in {wait}."
 
 
 ABOUT = """chirpo: manage your GitHub from your team chat, in plain language.
@@ -193,3 +203,13 @@ FILTER_YOURS = " assigned to you"
 DRY_IN_REPO = " in {repo}"
 DRY_NOTE = "  ({note})"
 CLOSE_REASONS = {"completed": "done", "not_planned": "not planned", "duplicate": "a duplicate"}
+
+
+def duration(seconds: int) -> str:
+    minutes = math.ceil(seconds / 60)
+    if minutes <= 1:
+        return "a minute"
+    if minutes < 60:
+        return f"{minutes} minutes"
+    hours = math.ceil(minutes / 60)
+    return "1 hour" if hours == 1 else f"{hours} hours"

@@ -3,7 +3,7 @@
 from pydantic import ValidationError
 
 from chirpo.core import messages
-from chirpo.core.commands.base import Request, allowed, audit, find_actor
+from chirpo.core.commands.base import Request, allowed, audit, find_actor, limited
 from chirpo.core.domain import AuditResult, NewIssue
 from chirpo.core.errors import CodeHostError
 from chirpo.core.permissions import Action
@@ -34,6 +34,11 @@ async def issue(request: Request) -> None:
         await request.reply(messages.ISSUE_TITLE_TOO_LONG)
         return
     payload = {"repo": repo.full_name, "title": new.title}
+    limits = actor.services.limits
+    if limits is not None:
+        verdict = await limits.check_write(actor.member.id)
+        if await limited(request, verdict):
+            return
     try:
         created = await actor.services.codehost.create_issue(repo, new)
     except CodeHostError as exc:

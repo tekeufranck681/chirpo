@@ -122,13 +122,38 @@ class FakeProcessedEvents:
         self.claimed.discard((source, external_id))
 
 
+class FakeCounters:
+    """In-memory window counters; `fail` makes every call raise, like a store that is down."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, int] = {}
+        self.fail: Exception | None = None
+
+    async def add(self, key: str, amount: int, ttl: int) -> int:
+        if self.fail:
+            raise self.fail
+        self.values[key] = self.values.get(key, 0) + amount
+        return self.values[key]
+
+    async def get(self, key: str) -> int:
+        if self.fail:
+            raise self.fail
+        return self.values.get(key, 0)
+
+
 class FakeLLM:
     """Answers with scripted proposals or errors, in order; keeps the requests it got."""
 
     model = "fake-llm"
 
-    def __init__(self, *answers: Sequence[Proposal] | Exception, delay: float = 0) -> None:
+    def __init__(
+        self,
+        *answers: Sequence[Proposal] | Exception,
+        delay: float = 0,
+        tokens: tuple[int, int] = (0, 0),
+    ) -> None:
         self.answers = list(answers)
+        self.tokens = tokens  # (in, out) reported with every answer
         self.requests: list[InterpretRequest] = []
         self.delay = delay  # seconds the "model" takes to answer
 
@@ -139,7 +164,7 @@ class FakeLLM:
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
-        return Interpretation(tuple(answer), self.model)
+        return Interpretation(tuple(answer), self.model, *self.tokens)
 
 
 class FakeMessageBuffer:

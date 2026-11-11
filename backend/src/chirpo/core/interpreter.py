@@ -15,7 +15,15 @@ from contextlib import asynccontextmanager, suppress
 
 from chirpo.core import messages
 from chirpo.core.actions import permission_of
-from chirpo.core.commands.base import Actor, Request, allowed, audit, find_actor, needs_services
+from chirpo.core.commands.base import (
+    Actor,
+    Request,
+    allowed,
+    audit,
+    find_actor,
+    limited,
+    needs_services,
+)
 from chirpo.core.context import MAX_ISSUES, Block, Team, context_blocks, default_of
 from chirpo.core.domain import AuditResult, IssueQuery, RecentMessage, RepoRef
 from chirpo.core.dryrun import describe
@@ -58,6 +66,10 @@ async def interpret(request: Request) -> None:
         await request.reply(messages.LINK_GITHUB_FIRST)
         return
 
+    if services.limits is not None:  # before anything is read or paid for
+        verdict = await services.limits.check_llm(actor.workspace.id, actor.member.id)
+        if await limited(request, verdict):
+            return
     default = default_of(repos)
     # Nothing of a repo is read, sent to the model or quoted back before this check.
     if not await allowed(request, actor, Action.VIEW, default):
@@ -125,6 +137,10 @@ async def _answer_timed(
     timer.lap("model")
     if interpretation is None:
         return
+    if services.limits is not None:
+        await services.limits.add_tokens(
+            actor.workspace.id, interpretation.input_tokens + interpretation.output_tokens
+        )
 
     async def can_read(repo: RepoRef) -> bool:
         return await allowed(request, actor, Action.VIEW, repo)

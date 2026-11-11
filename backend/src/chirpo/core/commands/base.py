@@ -1,12 +1,14 @@
 """What every command handler gets, and the checks they share (who is asking, are they allowed)."""
 
+import logging
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
 from chirpo.core import messages
 from chirpo.core.domain import AuditResult, InboundMessage, RepoRef
-from chirpo.core.errors import CodeHostForbiddenError
+from chirpo.core.errors import CodeHostForbiddenError, MessagingError
 from chirpo.core.identity import IdentityLinking
 from chirpo.core.permissions import Action, PermissionChecker, Refusal, Verdict
 from chirpo.core.ports import (
@@ -18,7 +20,10 @@ from chirpo.core.ports import (
     MessagingAdapter,
     Workspaces,
 )
+from chirpo.core.ratelimit import LimitVerdict, RateLimiter
 from chirpo.core.workspaces import AuditEntry, Member, Workspace
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +40,7 @@ class Services:
     buffer: MessageBuffer | None = None  # None: the instance keeps no messages (D46)
     context_hours: int = 0
     llm: LLMProvider | None = None  # None: no plain language, commands only
+    limits: RateLimiter | None = None  # None: no rate limits (D49)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +104,30 @@ async def audit(
             error=error,
         )
     )
+
+
+async def limited(request: Request, verdict: LimitVerdict) -> bool:
+    """True when a rate limit says no. Only the first refusal in a window is answered, so a flood
+    can't make the bot flood the chat back."""
+    if verdict.allowed:
+        return False
+    log.info(
+        "rate_limited scope=%s retry_after=%d told=%s",
+        verdict.scope,
+        verdict.retry_after,
+        verdict.notify,
+    )
+    if verdict.notify and verdict.scope:
+        texts = {
+            "member": messages.RATE_LIMITED_MEMBER,
+            "workspace": messages.RATE_LIMITED_TEAM,
+            "budget": messages.RATE_LIMITED_BUDGET,
+            "write": messages.WRITE_LIMITED,
+        }
+        wait = messages.duration(verdict.retry_after)
+        with suppress(MessagingError):  # a courtesy: the request is refused either way
+            await request.reply(texts[verdict.scope].format(wait=wait))
+    return True
 
 
 async def allowed(
