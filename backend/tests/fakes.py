@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from chirpo.core.actions import Proposal
 from chirpo.core.domain import (
+    Attachment,
     ChatRef,
     ChatUser,
     CloseReason,
@@ -32,6 +33,8 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import (
+    AttachmentTooLargeError,
+    AttachmentUnavailableError,
     CodeHostConflictError,
     CodeHostForbiddenError,
     CodeHostNotFoundError,
@@ -71,6 +74,8 @@ class FakeMessaging:
         self.sent: list[tuple[ChatRef, str, str | None]] = []
         self.edited: list[tuple[SentMessage, str]] = []
         self.typing: list[ChatRef] = []
+        self.files: dict[str, bytes] = {}  # what a download of each file id returns
+        self.downloads: list[tuple[str, int]] = []  # (file id, size limit) asked for
         self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
         self.chat_admins: set[str] = set()  # user ids that run the group
 
@@ -90,6 +95,15 @@ class FakeMessaging:
 
     async def show_typing(self, chat: ChatRef) -> None:
         self.typing.append(chat)
+
+    async def download(self, attachment: Attachment, *, max_bytes: int) -> bytes:
+        self.downloads.append((attachment.file_id, max_bytes))
+        data = self.files.get(attachment.file_id)
+        if data is None:
+            raise AttachmentUnavailableError(attachment.file_id)
+        if len(data) > max_bytes:
+            raise AttachmentTooLargeError(attachment.file_id)
+        return data
 
     def private_chat(self, user: ChatUser) -> ChatRef:
         return ChatRef(platform=self.platform, chat_id=user.user_id)
@@ -198,6 +212,7 @@ class FakeMessageBuffer:
                     sender=message.sender,
                     text=message.text[:MAX_MESSAGE_CHARS],
                     sent_at=min(message.sent_at, now),
+                    attachments=message.attachments[:10],
                 ),
             )
         )

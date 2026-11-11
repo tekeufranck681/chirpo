@@ -1,5 +1,6 @@
 """Implementations of the repository Protocols from core.ports."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chirpo.core.domain import (
+    Attachment,
     ChatRef,
     ChatUser,
     IdentityKind,
@@ -56,6 +58,9 @@ class SqlProcessedEvents:
 KEEP_CONTEXT = "keep_context"  # key in workspaces.settings
 
 
+MAX_KEPT_ATTACHMENTS = 10
+
+
 class SqlMessageBuffer:
     """Recent chat messages, text encrypted (D46).
 
@@ -84,6 +89,7 @@ class SqlMessageBuffer:
                 sender_name=message.sender.display_name,
                 sender_username=message.sender.username,
                 text_encrypted=self._encryptor.encrypt(message.text[:MAX_MESSAGE_CHARS]),
+                attachments_encrypted=self._seal(message.attachments),
                 sent_at=min(message.sent_at, datetime.now(UTC)),
             )
             .on_conflict_do_nothing(
@@ -151,6 +157,21 @@ class SqlMessageBuffer:
             result = await session.execute(statement)
             return int(result.rowcount)  # type: ignore[attr-defined]
 
+    def _seal(self, attachments: tuple[Attachment, ...]) -> str | None:
+        if not attachments:
+            return None
+        listed = [a.model_dump(mode="json") for a in attachments[:MAX_KEPT_ATTACHMENTS]]
+        return self._encryptor.encrypt(json.dumps(listed, separators=(",", ":")))
+
+    def _unseal(self, token: str | None) -> tuple[Attachment, ...]:
+        if token is None:
+            return ()
+        try:
+            listed = json.loads(self._encryptor.decrypt(token))
+            return tuple(Attachment.model_validate(item) for item in listed)
+        except (DecryptionError, ValueError, TypeError):
+            return ()  # the text is still useful context without its files
+
     def _to_recent(self, row: db.BufferedMessage) -> RecentMessage | None:
         try:
             text = self._encryptor.decrypt(row.text_encrypted)
@@ -167,6 +188,7 @@ class SqlMessageBuffer:
             ),
             text=text,
             sent_at=row.sent_at,
+            attachments=self._unseal(row.attachments_encrypted),
         )
 
 

@@ -19,6 +19,8 @@ async def handle_inbound(
 ) -> None:
     if not isinstance(event, InboundMessage) or event.sender.is_bot:
         return  # button presses are handled from M5; bots never trigger the bot (no loops)
+    if not event.text.strip():
+        return  # media alone asks for nothing; the buffer still remembers it
     command = parse_command(event.text)
     if command is not None and (handler := COMMANDS.get(command.name)):
         await handler(Request(event, command.args, messaging, services))
@@ -64,7 +66,9 @@ async def _remember(event: InboundEvent, services: Services | None) -> None:
     buffer = services.buffer if services else None
     if buffer is None or services is None or not isinstance(event, InboundMessage):
         return
-    if event.sender.is_bot or not event.text or event.text.startswith("/"):
+    if event.sender.is_bot or (not event.text and not event.attachments):
+        return
+    if event.text.startswith("/"):
         return  # commands, known or not, are no context
     workspace = await services.workspaces.for_chat(event.chat)
     if workspace is not None and workspace.keeps_context:

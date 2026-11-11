@@ -48,6 +48,24 @@ class ChatUser(BaseModel):
     is_anonymous: bool = False
 
 
+class AttachmentKind(StrEnum):
+    IMAGE = "image"
+    FILE = "file"
+    VOICE = "voice"
+
+
+class Attachment(BaseModel):
+    """A file sent with a message. Only what the platform says about it: the bytes are fetched
+    when a request needs them, never kept. No file name: it can be personal and nothing needs it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: AttachmentKind
+    file_id: str = Field(min_length=1)
+    mime_type: str | None = None
+    size: int | None = Field(default=None, ge=0)  # bytes, when the platform says
+
+
 class InboundMessage(BaseModel):
     """A chat message, normalised by a messaging adapter. `event_id` is unique per platform.
 
@@ -66,6 +84,9 @@ class InboundMessage(BaseModel):
     mentions_bot: bool = False
     replies_to_bot: bool = False
     reply_to_message_id: str | None = None
+    attachments: tuple[Attachment, ...] = ()
+    # What the replied-to message carries: the platform sends it along, so it needs no buffer.
+    reply_to_attachments: tuple[Attachment, ...] = ()
     is_private_chat: bool = False
 
 
@@ -79,6 +100,7 @@ class RecentMessage(BaseModel):
     sender: ChatUser
     text: str
     sent_at: AwareDatetime
+    attachments: tuple[Attachment, ...] = ()
 
 
 class InboundCallback(BaseModel):

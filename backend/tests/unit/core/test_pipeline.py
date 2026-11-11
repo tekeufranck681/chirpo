@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from chirpo.core import messages
 from chirpo.core.commands import Services
-from chirpo.core.domain import ChatUser, InboundMessage
+from chirpo.core.domain import Attachment, AttachmentKind, ChatUser, InboundMessage
 from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import handle_inbound, process
 from tests.fakes import (
@@ -188,6 +188,24 @@ class TestRemembering:
             make_message("/foo bar", event_id="3", message_id="12"),
         )
         assert world.kept() == []
+
+    async def test_a_photo_without_text_is_kept_with_its_attachment(self) -> None:
+        world = await _linked()
+        photo = Attachment(
+            kind=AttachmentKind.IMAGE, file_id="P1", mime_type="image/jpeg", size=900
+        )
+        await world.send(make_message("", event_id="1", message_id="10", attachments=(photo,)))
+        [kept] = world.buffer.everything()
+        assert (kept.text, kept.attachments) == ("", (photo,))
+
+    async def test_a_caption_and_its_photo_are_kept_together(self) -> None:
+        world = await _linked()
+        photo = Attachment(kind=AttachmentKind.IMAGE, file_id="P1", mime_type="image/jpeg")
+        await world.send(
+            make_message("crash on checkout", event_id="1", message_id="10", attachments=(photo,))
+        )
+        [kept] = world.buffer.everything()
+        assert (kept.text, kept.attachments) == ("crash on checkout", (photo,))
 
     async def test_not_bots_or_empty_messages(self) -> None:
         world = await _linked()

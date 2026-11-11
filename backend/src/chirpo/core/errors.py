@@ -23,6 +23,22 @@ class MessagingUnavailableError(MessagingError):
     """Network problem or platform outage; retrying later may succeed."""
 
 
+class AttachmentError(MessagingError):
+    """A file sent in the chat can't be fetched or used."""
+
+
+class AttachmentTooLargeError(AttachmentError):
+    pass
+
+
+class AttachmentUnavailableError(AttachmentError):
+    """The platform no longer has the file, or never had it."""
+
+
+class UnsupportedImageError(AttachmentError):
+    """Not a JPEG, PNG or WebP, whatever the sender or the platform called it."""
+
+
 class CountersUnavailableError(Exception):
     """The store behind the rate limits can't be reached."""
 

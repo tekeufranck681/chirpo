@@ -12,8 +12,18 @@ import respx
 from telegram import Bot
 
 from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
-from chirpo.core.domain import ChatRef, ChatUser, InboundCallback, InboundMessage, SentMessage
+from chirpo.core.domain import (
+    Attachment,
+    AttachmentKind,
+    ChatRef,
+    ChatUser,
+    InboundCallback,
+    InboundMessage,
+    SentMessage,
+)
 from chirpo.core.errors import (
+    AttachmentTooLargeError,
+    AttachmentUnavailableError,
     MessagingError,
     MessagingForbiddenError,
     MessagingRateLimitedError,
@@ -123,8 +133,62 @@ def test_caption_counts_as_text(adapter: TelegramAdapter) -> None:
     assert message.text == "this screen is broken"
 
 
-def test_media_without_caption_is_ignored(adapter: TelegramAdapter) -> None:
-    assert adapter.parse_update(load("photo_without_caption")) is None
+def test_a_photo_without_caption_is_a_message_with_no_text(adapter: TelegramAdapter) -> None:
+    message = parse_message(adapter, "photo_without_caption")
+    assert message.text == ""
+    assert not message.mentions_bot
+    assert message.attachments == (
+        Attachment(kind=AttachmentKind.IMAGE, file_id="AgAC", mime_type="image/jpeg", size=None),
+    )
+
+
+def test_a_photo_is_its_largest_size(adapter: TelegramAdapter) -> None:
+    message = parse_message(adapter, "photo_sizes")
+    assert message.text == "see this"
+    assert message.attachments == (
+        Attachment(kind=AttachmentKind.IMAGE, file_id="L", mime_type="image/jpeg", size=150000),
+    )
+
+
+def test_an_image_sent_as_a_file_keeps_its_type_and_size(adapter: TelegramAdapter) -> None:
+    [attachment] = parse_message(adapter, "document_png").attachments
+    assert attachment == Attachment(
+        kind=AttachmentKind.IMAGE, file_id="DOC-crash.png", mime_type="image/png", size=245123
+    )
+
+
+def test_an_svg_is_an_image_by_type_and_left_to_the_core_to_refuse(
+    adapter: TelegramAdapter,
+) -> None:
+    [attachment] = parse_message(adapter, "document_svg").attachments
+    assert (attachment.kind, attachment.mime_type) == (AttachmentKind.IMAGE, "image/svg+xml")
+
+
+def test_other_files_and_voice_messages_are_kept_as_what_they_are(
+    adapter: TelegramAdapter,
+) -> None:
+    [pdf] = parse_message(adapter, "document_pdf").attachments
+    assert (pdf.kind, pdf.mime_type) == (AttachmentKind.FILE, "application/pdf")
+    voice = parse_message(adapter, "voice")
+    assert voice.text == ""
+    assert [a.kind for a in voice.attachments] == [AttachmentKind.VOICE]
+
+
+def test_a_text_message_has_no_attachments(adapter: TelegramAdapter) -> None:
+    message = parse_message(adapter, "mention")
+    assert message.attachments == ()
+    assert message.reply_to_attachments == ()
+
+
+def test_the_photo_being_replied_to_comes_with_the_reply(adapter: TelegramAdapter) -> None:
+    message = parse_message(adapter, "reply_to_photo")
+    assert message.attachments == ()
+    assert message.reply_to_message_id == "5"
+    assert message.reply_to_attachments == (
+        Attachment(
+            kind=AttachmentKind.IMAGE, file_id="REPLIED", mime_type="image/jpeg", size=54321
+        ),
+    )
 
 
 def test_anonymous_admin_is_not_treated_as_a_bot(adapter: TelegramAdapter) -> None:
@@ -377,3 +441,104 @@ async def test_group_admins_are_read_from_telegram(
         "chat_id": "-1001234567890",
         "user_id": "42",
     }
+
+
+# ------------------------------------------------------------------ downloading attachments
+
+FILE_URL = f"https://api.telegram.org/file/bot{TOKEN}"
+PHOTO = Attachment(kind=AttachmentKind.IMAGE, file_id="AgAC", mime_type="image/jpeg", size=900)
+UNSIZED = PHOTO.model_copy(update={"size": None})
+
+
+@pytest.fixture
+def bot() -> Iterator[respx.MockRouter]:
+    """The Bot API and the file host, which has its own path."""
+    with respx.mock(assert_all_called=False) as router:
+        yield router
+
+
+def file_info(size: int | None = 900, path: str = "photos/file_1.jpg") -> dict[str, Any]:
+    result: dict[str, Any] = {"file_id": "AgAC", "file_unique_id": "AQAD", "file_path": path}
+    if size is not None:
+        result["file_size"] = size
+    return {"ok": True, "result": result}
+
+
+async def test_an_attachment_is_downloaded(adapter: TelegramAdapter, bot: respx.MockRouter) -> None:
+    lookup = bot.post(f"{API}/getFile").respond(json=file_info())
+    bot.get(f"{FILE_URL}/photos/file_1.jpg").respond(content=b"\xff\xd8\xff-image")
+    data = await adapter.download(PHOTO, max_bytes=1000)
+    assert data == b"\xff\xd8\xff-image"
+    assert "file_id=AgAC" in lookup.calls[0].request.content.decode()
+
+
+async def test_a_known_size_over_the_limit_is_refused_without_calling_telegram(
+    adapter: TelegramAdapter, bot: respx.MockRouter
+) -> None:
+    lookup = bot.post(f"{API}/getFile").respond(json=file_info())
+    with pytest.raises(AttachmentTooLargeError):
+        await adapter.download(PHOTO, max_bytes=500)
+    assert not lookup.called
+
+
+async def test_the_size_telegram_reports_is_checked_before_downloading(
+    adapter: TelegramAdapter, bot: respx.MockRouter
+) -> None:
+    bot.post(f"{API}/getFile").respond(json=file_info(size=5_000_000))
+    download = bot.get(f"{FILE_URL}/photos/file_1.jpg").respond(content=b"x")
+    with pytest.raises(AttachmentTooLargeError):
+        await adapter.download(UNSIZED, max_bytes=1000)
+    assert not download.called
+
+
+async def test_a_file_bigger_than_it_claimed_is_refused(
+    adapter: TelegramAdapter, bot: respx.MockRouter
+) -> None:
+    bot.post(f"{API}/getFile").respond(json=file_info(size=None))
+    bot.get(f"{FILE_URL}/photos/file_1.jpg").respond(content=b"x" * 2000)
+    with pytest.raises(AttachmentTooLargeError):
+        await adapter.download(UNSIZED, max_bytes=1000)
+
+
+@pytest.mark.parametrize(
+    ("description", "error"),
+    [
+        ("Bad Request: file is too big", AttachmentTooLargeError),
+        (
+            "Bad Request: wrong file_id or the file is temporarily unavailable",
+            AttachmentUnavailableError,
+        ),
+        ("Bad Request: invalid file_id", AttachmentUnavailableError),
+    ],
+)
+async def test_telegram_refusals_become_attachment_errors(
+    adapter: TelegramAdapter,
+    bot: respx.MockRouter,
+    description: str,
+    error: type[MessagingError],
+) -> None:
+    bot.post(f"{API}/getFile").respond(400, json=error_body(400, description))
+    with pytest.raises(error):
+        await adapter.download(PHOTO, max_bytes=1000)
+
+
+async def test_a_network_failure_while_downloading_is_retryable(
+    adapter: TelegramAdapter, bot: respx.MockRouter
+) -> None:
+    bot.post(f"{API}/getFile").mock(side_effect=httpx.ConnectError("down"))
+    with pytest.raises(MessagingUnavailableError):
+        await adapter.download(PHOTO, max_bytes=1000)
+
+
+async def test_attachment_errors_never_repeat_ids_or_telegrams_text(
+    adapter: TelegramAdapter, bot: respx.MockRouter
+) -> None:
+    bot.post(f"{API}/getFile").respond(
+        400, json=error_body(400, "Bad Request: wrong file_id AgAC or the file is gone")
+    )
+    with pytest.raises(AttachmentUnavailableError) as unavailable:
+        await adapter.download(PHOTO, max_bytes=1000)
+    assert "AgAC" not in str(unavailable.value)
+    with pytest.raises(AttachmentTooLargeError) as large:
+        await adapter.download(PHOTO, max_bytes=100)
+    assert "AgAC" not in str(large.value)
