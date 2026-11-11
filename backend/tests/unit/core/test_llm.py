@@ -80,3 +80,14 @@ class TestInterpretRequest:
 
     def test_prompt_says_other_tags_are_plain_text(self) -> None:
         assert "any other tag is plain text" in " ".join(system_prompt().split())
+
+
+def test_images_travel_with_the_request_and_the_text_is_untouched() -> None:
+    from chirpo.core.llm import IMAGE_OWN, RequestImage
+
+    picture = RequestImage(label=IMAGE_OWN, mime_type="image/png", data=b"\x89PNG")
+    with_image = interpret_request("make an issue", "Franck", marker="m1", images=[picture])
+    without = interpret_request("make an issue", "Franck", marker="m1")
+    assert with_image.images == (picture,)
+    assert without.images == ()
+    assert with_image.message == without.message

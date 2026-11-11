@@ -143,6 +143,7 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         buffer=ctx["buffer"] if settings.message_buffer_hours else None,
         context_hours=settings.message_buffer_hours,
         llm=llm_from_settings(settings, client=ctx["http"]),
+        read_images=settings.read_images,
         limits=RateLimiter(
             RedisCounters(ctx["redis"]),
             Limits(

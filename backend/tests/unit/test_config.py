@@ -148,3 +148,8 @@ def test_rate_limit_defaults_and_bounds() -> None:
     ):
         with pytest.raises(ValidationError):
             make_settings(**{name: -1})
+
+
+def test_reading_images_is_on_unless_switched_off() -> None:
+    assert make_settings().read_images is True
+    assert make_settings(read_images=False).read_images is False

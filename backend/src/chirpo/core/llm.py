@@ -19,12 +19,24 @@ MAX_MESSAGE_CHARS = 4000  # a Telegram message is at most 4096; anything longer 
 MAX_SENDER_CHARS = 100
 
 
+IMAGE_OWN = "Image attached to the chat message:"
+IMAGE_REPLIED = "Image attached to the message being replied to:"
+
+
+@dataclass(frozen=True, slots=True)
+class RequestImage:
+    label: str  # says where the image came from; written by us, never by a chat user
+    mime_type: str  # what the bytes are, found by looking at them (core/images.py)
+    data: bytes
+
+
 @dataclass(frozen=True, slots=True)
 class InterpretRequest:
     # The fixed prompt comes first so providers can cache it; this request's marker ends it.
     instructions: str
     message: str
     tools: tuple[ToolSpec, ...]
+    images: tuple[RequestImage, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +59,7 @@ def interpret_request(
     sender: str,
     *,
     context: Sequence[tuple[str, str]] = (),
+    images: Sequence[RequestImage] = (),
     marker: str | None = None,
 ) -> InterpretRequest:
     """`context`: (kind, body) blocks from `core.context`, each wrapped like the message."""
@@ -58,6 +71,7 @@ def interpret_request(
         instructions=f"{system_prompt()}\n\nThis request's marker is `{marker}`.",
         message="\n\n".join(blocks),
         tools=tool_specs(),
+        images=tuple(images),
     )
 
 

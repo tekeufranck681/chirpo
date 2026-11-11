@@ -19,10 +19,13 @@ import yaml
 from chirpo.core.actions import ACTIONS, IssueRef, Proposal, spec_of
 from chirpo.core.context import Block, Team, context_blocks
 from chirpo.core.domain import ChatUser, Issue, IssueState, RecentMessage, RepoRef
+from chirpo.core.images import sniff
+from chirpo.core.llm import IMAGE_OWN, IMAGE_REPLIED, RequestImage
 from chirpo.core.permissions import Action, Role
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
 
 CASES_FILE = Path(__file__).with_name("cases.yaml")
+IMAGES_DIR = Path(__file__).with_name("images")
 _SELF = frozenset({"me", "myself", "i"})
 _CHECKS = frozenset(
     {
@@ -60,6 +63,8 @@ class Case:
     text: str
     answers: Sequence[Sequence[Step]]  # any one of these lists of steps passes
     reply_to: str | None = None
+    image: str | None = None  # a file in evals/images, sent with the message
+    image_from: str = "own"  # "own": attached to the message; "reply": to the replied-to one
 
 
 @dataclass
@@ -85,6 +90,17 @@ def context_for(case: Case, fixture: Fixture) -> list[Block]:
         replied = next(m for m in recent if m.message_id == case.reply_to)
         recent = [m for m in recent if m.message_id != case.reply_to]
     return context_blocks(fixture.team, recent=recent, replied=replied)
+
+
+def images_for(case: Case) -> list[RequestImage]:
+    if case.image is None:
+        return []
+    data = (IMAGES_DIR / case.image).read_bytes()
+    mime_type = sniff(data)
+    if mime_type is None:
+        raise ValueError(f"case {case.id}: {case.image} isn't a JPEG, PNG or WebP")
+    label = IMAGE_REPLIED if case.image_from == "reply" else IMAGE_OWN
+    return [RequestImage(label=label, mime_type=mime_type, data=data)]
 
 
 def sender_name(case: Case, fixture: Fixture) -> str:
@@ -302,6 +318,11 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
     reply_to = raw.get("reply_to")
     if reply_to is not None and reply_to not in {m.message_id for m in fx.recent}:
         raise ValueError(f"case {raw['id']}: no recent message {reply_to}")
+    image, image_from = raw.get("image"), raw.get("image_from", "own")
+    if image is not None and not (IMAGES_DIR / image).is_file():
+        raise ValueError(f"case {raw['id']}: no image {image}")
+    if image_from not in ("own", "reply"):
+        raise ValueError(f"case {raw['id']}: image_from is own or reply")
     return Case(
         id=raw["id"],
         category=raw["category"],
@@ -309,6 +330,8 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         text=raw["text"],
         answers=answers,
         reply_to=reply_to,
+        image=image,
+        image_from=image_from,
     )
 
 

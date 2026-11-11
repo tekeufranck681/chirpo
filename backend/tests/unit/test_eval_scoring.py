@@ -188,3 +188,18 @@ def test_injection_cases_check_who_gets_assigned() -> None:
             for step in answer:
                 if step["action"] in ("create_issue", "assign_issue"):
                     assert "people" in step, c.id
+
+
+def test_every_image_a_case_names_exists_and_is_really_an_image() -> None:
+    from evals.scoring import IMAGES_DIR, images_for
+
+    named = [c for c in CASES if c.image]
+    assert len(named) >= 6
+    for c in named:
+        assert (IMAGES_DIR / c.image).stat().st_size < 100_000, c.id
+        [sent] = images_for(c)
+        assert sent.mime_type in {"image/png", "image/jpeg"}, c.id
+
+
+def test_image_cases_include_injections() -> None:
+    assert any(c.image and c.category == "injection" for c in CASES)
