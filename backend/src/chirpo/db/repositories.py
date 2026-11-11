@@ -1,7 +1,9 @@
 """Implementations of the repository Protocols from core.ports."""
 
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, delete, func, or_, select, update
@@ -19,6 +21,7 @@ from chirpo.core.domain import (
 )
 from chirpo.core.errors import LastAdminError
 from chirpo.core.llm import MAX_MESSAGE_CHARS
+from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 from chirpo.db import models as db
@@ -599,3 +602,104 @@ class SqlAuditLog:
                     error=entry.error,
                 )
             )
+
+
+class SqlPendingActions:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    async def create(
+        self,
+        *,
+        workspace_id: UUID,
+        requested_by: UUID,
+        chat: ChatRef,
+        steps: Sequence[Step],
+        expires_at: datetime,
+    ) -> PendingAction:
+        async with self._sessions.begin() as session:
+            row = db.PendingAction(
+                workspace_id=workspace_id,
+                requested_by=requested_by,
+                platform=chat.platform,
+                chat_id=chat.chat_id,
+                thread_id=chat.thread_id,
+                steps=[step.model_dump(mode="json") for step in steps],
+                expires_at=expires_at,
+            )
+            session.add(row)
+            await session.flush()
+            await session.refresh(row)  # the id and defaults the database chose
+            return _to_pending(row)
+
+    async def attach_message(self, workspace_id: UUID, pending_id: UUID, message_id: str) -> None:
+        async with self._sessions.begin() as session:
+            await session.execute(
+                update(db.PendingAction)
+                .where(
+                    db.PendingAction.id == pending_id,
+                    db.PendingAction.workspace_id == workspace_id,
+                )
+                .values(message_id=message_id)
+            )
+
+    async def get(self, workspace_id: UUID, pending_id: UUID) -> PendingAction | None:
+        async with self._sessions() as session:
+            row = await session.scalar(
+                select(db.PendingAction).where(
+                    db.PendingAction.id == pending_id,
+                    db.PendingAction.workspace_id == workspace_id,
+                )
+            )
+            return _to_pending(row) if row is not None else None
+
+    async def advance(
+        self,
+        workspace_id: UUID,
+        pending_id: UUID,
+        *,
+        expect: PendingStatus,
+        to: PendingStatus,
+        now: datetime,
+        by: UUID | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> PendingAction | None:
+        # One UPDATE decides the race: only a row still in `expect` (and, when it is being
+        # decided, not yet expired) matches, so of two simultaneous presses one gets the row.
+        conditions: list[ColumnElement[bool]] = [
+            db.PendingAction.id == pending_id,
+            db.PendingAction.workspace_id == workspace_id,
+            db.PendingAction.status == expect.value,
+        ]
+        if expect == PendingStatus.PROPOSED and to != PendingStatus.EXPIRED:
+            conditions.append(db.PendingAction.expires_at > now)
+        values: dict[str, Any] = {"status": to.value}
+        if by is not None:
+            values["confirmed_by"] = by
+        if result is not None:
+            values["result"] = result
+        async with self._sessions.begin() as session:
+            row = (
+                await session.execute(
+                    update(db.PendingAction)
+                    .where(*conditions)
+                    .values(**values)
+                    .returning(db.PendingAction)
+                )
+            ).scalar_one_or_none()
+            return _to_pending(row) if row is not None else None
+
+
+def _to_pending(row: db.PendingAction) -> PendingAction:
+    return PendingAction(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        requested_by=row.requested_by,
+        chat=ChatRef(platform=row.platform, chat_id=row.chat_id, thread_id=row.thread_id),
+        message_id=row.message_id,
+        steps=tuple(Step.model_validate(step) for step in row.steps),
+        status=PendingStatus(row.status),
+        confirmed_by=row.confirmed_by,
+        expires_at=row.expires_at,
+        result=row.result,
+    )

@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     llm_tokens_per_day: int = Field(default=0, ge=0)
     github_writes_per_member_hour: int = Field(default=30, ge=0)
 
+    # How long a card waits for Confirm before it expires (D53).
+    proposal_ttl_minutes: int = Field(default=60, ge=1, le=60 * 24 * 7)
+
     @field_validator("database_url")
     @classmethod
     def _async_postgres_driver(cls, value: str) -> str:

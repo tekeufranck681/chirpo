@@ -15,6 +15,7 @@ from chirpo.adapters.messaging.telegram.adapter import TelegramAdapter
 from chirpo.core.domain import (
     Attachment,
     AttachmentKind,
+    Button,
     ChatRef,
     ChatUser,
     InboundCallback,
@@ -209,6 +210,8 @@ def test_button_press(adapter: TelegramAdapter) -> None:
     event = adapter.parse_update(load("callback"))
     assert isinstance(event, InboundCallback)
     assert (event.data, event.message_id, event.chat) == ("confirm:abc", "14", GROUP)
+    assert event.query_id == "4382bfdwdsb323b2d9"  # what answering the press needs
+    assert not event.sender.is_anonymous  # a press always comes from a person's account
 
 
 # ------------------------------------------------------------------ sending
@@ -225,6 +228,28 @@ async def test_send_message_replies_without_link_previews(
     assert "chat_id=-1001234567890" in body
     assert "reply_parameters" in body
     assert "is_disabled" in body
+
+
+async def test_buttons_go_under_the_message_in_one_row(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    route = api.post("/sendMessage").respond(json={"ok": True, "result": SENT})
+    buttons = [Button(text="Yes", data="ok:1"), Button(text="No", data="no:1")]
+    await adapter.send_message(GROUP, "Sure?", buttons=buttons)
+    markup = json.loads(dict(parse_qsl(route.calls[0].request.content.decode()))["reply_markup"])
+    assert markup == {
+        "inline_keyboard": [
+            [{"text": "Yes", "callback_data": "ok:1"}, {"text": "No", "callback_data": "no:1"}]
+        ]
+    }
+
+
+async def test_a_message_without_buttons_has_no_keyboard(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    route = api.post("/sendMessage").respond(json={"ok": True, "result": SENT})
+    await adapter.send_message(GROUP, "pong")
+    assert "reply_markup" not in route.calls[0].request.content.decode()
 
 
 async def test_send_into_a_topic(adapter: TelegramAdapter, api: respx.MockRouter) -> None:
@@ -249,6 +274,36 @@ async def test_edit_message(adapter: TelegramAdapter, api: respx.MockRouter) -> 
     route = api.post("/editMessageText").respond(json={"ok": True, "result": SENT})
     await adapter.edit_message(SentMessage(chat=GROUP, message_id="77"), "done")
     assert "message_id=77" in route.calls[0].request.content.decode()
+
+
+async def test_editing_without_buttons_sends_no_keyboard_so_telegram_removes_it(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    route = api.post("/editMessageText").respond(json={"ok": True, "result": SENT})
+    await adapter.edit_message(SentMessage(chat=GROUP, message_id="77"), "done")
+    assert "reply_markup" not in route.calls[0].request.content.decode()  # Telegram drops them
+
+
+async def test_answering_a_press(adapter: TelegramAdapter, api: respx.MockRouter) -> None:
+    route = api.post("/answerCallbackQuery").respond(json={"ok": True, "result": True})
+    event = adapter.parse_update(load("callback"))
+    assert isinstance(event, InboundCallback)
+    await adapter.answer_callback(event, "Only Franck can confirm this.")
+    body = dict(parse_qsl(route.calls[0].request.content.decode()))
+    assert body["callback_query_id"] == "4382bfdwdsb323b2d9"
+    assert body["text"] == "Only Franck can confirm this."
+
+
+async def test_answering_a_stale_press_is_an_error_the_core_can_ignore(
+    adapter: TelegramAdapter, api: respx.MockRouter
+) -> None:
+    api.post("/answerCallbackQuery").respond(
+        400, json=error_body(400, "Bad Request: query is too old and response timeout expired")
+    )
+    event = adapter.parse_update(load("callback"))
+    assert isinstance(event, InboundCallback)
+    with pytest.raises(MessagingError):
+        await adapter.answer_callback(event)
 
 
 async def test_editing_to_the_same_text_is_not_an_error(

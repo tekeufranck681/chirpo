@@ -1,14 +1,16 @@
 """Message -> interpret -> validate -> authorise -> confirm -> execute.
 
 Commands are handled deterministically (core/commands); anything else addressed to the bot goes to
-the interpreter (core/interpreter), which so far replies with what it would do.
+the interpreter (core/interpreter), which answers reads and posts a card for changes; a press on
+the card's buttons goes to core/confirmation.
 """
 
 import asyncio
 
 from chirpo.core import messages
 from chirpo.core.commands import COMMANDS, Request, Services
-from chirpo.core.domain import InboundEvent, InboundMessage
+from chirpo.core.confirmation import handle_callback
+from chirpo.core.domain import InboundCallback, InboundEvent, InboundMessage
 from chirpo.core.interpreter import interpret
 from chirpo.core.ports import MessagingAdapter, ProcessedEvents
 from chirpo.core.router import is_explicitly_addressed, parse_command
@@ -17,8 +19,11 @@ from chirpo.core.router import is_explicitly_addressed, parse_command
 async def handle_inbound(
     event: InboundEvent, messaging: MessagingAdapter, services: Services | None = None
 ) -> None:
-    if not isinstance(event, InboundMessage) or event.sender.is_bot:
-        return  # button presses are handled from M5; bots never trigger the bot (no loops)
+    if isinstance(event, InboundCallback):
+        await handle_callback(event, messaging, services)
+        return
+    if event.sender.is_bot:
+        return  # bots never trigger the bot (no loops)
     if not event.text.strip():
         return  # media alone asks for nothing; the buffer still remembers it
     command = parse_command(event.text)

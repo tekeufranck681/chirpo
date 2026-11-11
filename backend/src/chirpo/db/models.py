@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from chirpo.core.domain import AuditResult, IdentityKind
+from chirpo.core.pending import PendingStatus
 from chirpo.core.permissions import Role
 
 NAMING_CONVENTION = {
@@ -215,6 +216,40 @@ class AuditEvent(IdMixin, Base):
     result: Mapped[str] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class PendingAction(IdMixin, TimestampsMixin, WorkspaceScopedMixin, Base):
+    """A proposal waiting for someone to confirm it (M5). `steps` is what runs on Confirm."""
+
+    __tablename__ = "pending_actions"
+    __table_args__ = (
+        CheckConstraint(one_of("status", PendingStatus), name="status"),
+        # The person who asked must belong to the same workspace as the proposal.
+        ForeignKeyConstraint(
+            ["workspace_id", "requested_by"],
+            ["members.workspace_id", "members.id"],
+            ondelete="CASCADE",
+        ),
+        # For the sweep that expires old proposals, across workspaces: only open ones are indexed.
+        Index(
+            "ix_pending_actions_expires_at",
+            "expires_at",
+            postgresql_where=text("status = 'proposed'"),
+        ),
+    )
+
+    requested_by: Mapped[uuid.UUID]
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("members.id", ondelete="SET NULL")
+    )
+    platform: Mapped[str] = mapped_column(Text)
+    chat_id: Mapped[str] = mapped_column(Text)
+    thread_id: Mapped[str | None] = mapped_column(Text)
+    message_id: Mapped[str | None] = mapped_column(Text)  # the card, once it was sent
+    steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text, server_default=PendingStatus.PROPOSED.value)
+    result: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_JSON)
+    expires_at: Mapped[datetime]
 
 
 class Secret(IdMixin, TimestampsMixin, Base):

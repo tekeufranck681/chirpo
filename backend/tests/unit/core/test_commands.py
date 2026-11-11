@@ -20,6 +20,7 @@ from tests.fakes import (
     FakeMembers,
     FakeMessageBuffer,
     FakeMessaging,
+    FakePendingActions,
     FakeWorkspaces,
     make_message,
 )
@@ -48,6 +49,7 @@ class World:
             audit=self.audit,
             codehost=self.codehost,
             permissions=PermissionChecker(self.codehost),
+            pending=FakePendingActions(),
             app_install_url="https://github.com/apps/chirpo-dev/installations/new",
             buffer=self.buffer,
             context_hours=24,

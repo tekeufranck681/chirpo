@@ -4,10 +4,19 @@ Uses python-telegram-bot's `Bot` and `Update` classes only, not its Application 
 """
 
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Self
 
-from telegram import Bot, LinkPreviewOptions, Message, ReplyParameters, Update, User
+from telegram import (
+    Bot,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LinkPreviewOptions,
+    Message,
+    ReplyParameters,
+    Update,
+    User,
+)
 from telegram.constants import ChatAction, ChatMemberStatus
 from telegram.error import (
     BadRequest,
@@ -21,6 +30,7 @@ from telegram.error import (
 from chirpo.core.domain import (
     Attachment,
     AttachmentKind,
+    Button,
     ChatRef,
     ChatUser,
     InboundCallback,
@@ -115,7 +125,12 @@ class TelegramAdapter:
         return None  # edits, channel posts, member updates, ...: not handled
 
     async def send_message(
-        self, chat: ChatRef, text: str, *, reply_to: str | None = None
+        self,
+        chat: ChatRef,
+        text: str,
+        *,
+        reply_to: str | None = None,
+        buttons: Sequence[Button] = (),
     ) -> SentMessage:
         sent = await _translate_errors(
             lambda: self._bot.send_message(
@@ -128,6 +143,7 @@ class TelegramAdapter:
                     else None
                 ),
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
+                reply_markup=_keyboard(buttons) if buttons else None,
             )
         )
         return SentMessage(chat=chat, message_id=str(sent.message_id))
@@ -167,7 +183,14 @@ class TelegramAdapter:
             raise AttachmentTooLargeError("larger than the limit")
         return bytes(data)
 
-    async def edit_message(self, message: SentMessage, text: str) -> None:
+    async def answer_callback(self, callback: InboundCallback, text: str | None = None) -> None:
+        await _translate_errors(
+            lambda: self._bot.answer_callback_query(callback.query_id, text=text)
+        )
+
+    async def edit_message(
+        self, message: SentMessage, text: str, *, buttons: Sequence[Button] = ()
+    ) -> None:
         try:
             await _translate_errors(
                 lambda: self._bot.edit_message_text(
@@ -175,6 +198,8 @@ class TelegramAdapter:
                     message_id=int(message.message_id),
                     text=text,
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    # Telegram drops the buttons from an edit that doesn't pass any
+                    reply_markup=_keyboard(buttons) if buttons else None,
                 )
             )
         except MessagingError as error:
@@ -220,6 +245,7 @@ class TelegramAdapter:
             return None
         return InboundCallback(
             event_id=str(update.update_id),
+            query_id=query.id,
             chat=_chat_ref(query.message),
             sender=_user(query.from_user),
             message_id=str(query.message.message_id),
@@ -235,6 +261,13 @@ class TelegramAdapter:
         if match.group("target").lower() != self._bot_username.lower():
             return text, False
         return match.group("command") + text[match.end() :], True
+
+
+def _keyboard(buttons: Sequence[Button]) -> InlineKeyboardMarkup:
+    """The buttons in one row under the message."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(b.text, callback_data=b.data) for b in buttons]]
+    )
 
 
 def _attachments(message: Message) -> tuple[Attachment, ...]:

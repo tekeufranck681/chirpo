@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from chirpo.core import messages
@@ -18,6 +19,7 @@ from chirpo.core.ports import (
     Members,
     MessageBuffer,
     MessagingAdapter,
+    PendingActions,
     Workspaces,
 )
 from chirpo.core.ratelimit import LimitVerdict, RateLimiter
@@ -35,6 +37,7 @@ class Services:
     audit: AuditLog
     codehost: CodeHostAdapter
     permissions: PermissionChecker
+    pending: PendingActions
     identity: IdentityLinking | None = None
     app_install_url: str | None = None
     buffer: MessageBuffer | None = None  # None: the instance keeps no messages (D46)
@@ -42,6 +45,8 @@ class Services:
     llm: LLMProvider | None = None  # None: no plain language, commands only
     limits: RateLimiter | None = None  # None: no rate limits (D49)
     read_images: bool = False  # show images sent with a request to the LLM (D50)
+    proposal_ttl: timedelta = timedelta(hours=1)  # how long a card can be confirmed (D53)
+    now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)

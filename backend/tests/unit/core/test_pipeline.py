@@ -18,6 +18,7 @@ from tests.fakes import (
     FakeMembers,
     FakeMessageBuffer,
     FakeMessaging,
+    FakePendingActions,
     FakeProcessedEvents,
     FakeWorkspaces,
     make_callback,
@@ -145,6 +146,7 @@ class World:
             audit=FakeAuditLog(),
             codehost=codehost,
             permissions=PermissionChecker(codehost),
+            pending=FakePendingActions(),
             buffer=self.buffer,
             context_hours=24,
         )

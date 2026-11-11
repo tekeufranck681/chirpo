@@ -153,3 +153,11 @@ def test_rate_limit_defaults_and_bounds() -> None:
 def test_reading_images_is_on_unless_switched_off() -> None:
     assert make_settings().read_images is True
     assert make_settings(read_images=False).read_images is False
+
+
+def test_a_proposal_can_be_confirmed_for_an_hour_by_default() -> None:
+    assert make_settings().proposal_ttl_minutes == 60
+    assert make_settings(proposal_ttl_minutes=15).proposal_ttl_minutes == 15
+    for bad in (0, -5, 60 * 24 * 7 + 1):  # it must expire, and not outlive a week
+        with pytest.raises(ValidationError):
+            make_settings(proposal_ttl_minutes=bad)

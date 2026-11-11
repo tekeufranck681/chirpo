@@ -1,10 +1,11 @@
-"""A plain-language request, from message to the dry-run reply (D47).
+"""A plain-language request, from message to the answer or the confirmation card (D47, D53).
 
 Order: cheap checks first (linked repo, model, a verified sender) so no model call is wasted; then
 the sender's read access to the repo, before anything of it is read, sent to the model or quoted;
 then context, the model's proposals, resolution against the workspace (which checks read access
-to any other repo named), and the sender's permission for every step. Nothing runs on the code
-host here: the reply says what would happen.
+to any other repo named), and the sender's permission for every step. Reads are answered here.
+Changes are stored and shown as a card to confirm: nothing is changed on the code host until a
+person presses Confirm (core/confirmation.py).
 """
 
 import asyncio
@@ -26,9 +27,9 @@ from chirpo.core.commands.base import (
     limited,
     needs_services,
 )
+from chirpo.core.confirmation import propose
 from chirpo.core.context import MAX_ISSUES, Block, Team, context_blocks, default_of
 from chirpo.core.domain import Attachment, AuditResult, IssueQuery, RecentMessage, RepoRef
-from chirpo.core.dryrun import describe
 from chirpo.core.errors import (
     CodeHostError,
     LLMError,
@@ -202,9 +203,12 @@ async def _answer_timed(
             raise
         await audit(actor, Action.VIEW, AuditResult.EXECUTED, {"repo": step.repo.full_name})
     changes = [step for step in result if not is_read(step)]
+    if parts:
+        await request.reply(
+            "\n\n".join(parts) if changes else _with_notes("\n\n".join(parts), notes)
+        )
     if changes:
-        parts.append(describe(changes, default))
-    await request.reply(_with_notes("\n\n".join(parts), notes))
+        await propose(request, actor.member, services, changes, default, notes)
     timer.lap("reply")
 
 

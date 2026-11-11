@@ -24,6 +24,7 @@ from tests.fakes import (
     FakeCodeHost,
     FakeMembers,
     FakeMessaging,
+    FakePendingActions,
     FakeWorkspaces,
     make_message,
 )
@@ -124,6 +125,7 @@ class World:
             audit=self.audit,
             codehost=codehost,
             permissions=PermissionChecker(codehost),
+            pending=FakePendingActions(),
             identity=self.identity,
         )
 
