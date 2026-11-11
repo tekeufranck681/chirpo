@@ -18,9 +18,17 @@ import yaml
 
 from chirpo.core.actions import ACTIONS, IssueRef, Proposal, spec_of
 from chirpo.core.context import Block, Team, context_blocks
-from chirpo.core.domain import ChatUser, Issue, IssueState, RecentMessage, RepoRef
+from chirpo.core.domain import (
+    Attachment,
+    AttachmentKind,
+    ChatUser,
+    Issue,
+    IssueState,
+    RecentMessage,
+    RepoRef,
+)
 from chirpo.core.images import sniff
-from chirpo.core.llm import IMAGE_OWN, IMAGE_REPLIED, RequestImage
+from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
 from chirpo.core.permissions import Action, Role
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
 
@@ -65,6 +73,11 @@ class Case:
     reply_to: str | None = None
     image: str | None = None  # a file in evals/images, sent with the message
     image_from: str = "own"  # "own": attached to the message; "reply": to the replied-to one
+    # A screenshot Annie sent two minutes ago, which the model may ask to see (D52); `look` says
+    # whether it must (true) or must not (false) ask.
+    recent_image: str | None = None
+    recent_image_text: str = ""
+    look: bool | None = None
 
 
 @dataclass
@@ -84,12 +97,55 @@ def load(path: Path = CASES_FILE) -> tuple[Fixture, list[Case]]:
     return fixture, cases
 
 
+RECENT_IMAGE_ID = "eval-recent-image"
+
+
+def look_candidate(case: Case, fixture: Fixture) -> Attachment | None:
+    """The image of the case's recent screenshot, which the model may ask to see."""
+    if case.recent_image is None:
+        return None
+    data = (IMAGES_DIR / case.recent_image).read_bytes()
+    return Attachment(
+        kind=AttachmentKind.IMAGE,
+        file_id=f"eval:{case.recent_image}",
+        mime_type=sniff(data),
+        size=len(data),
+    )
+
+
+def fetch_eval_image(attachment: Attachment) -> RequestImage:
+    data = (IMAGES_DIR / attachment.file_id.removeprefix("eval:")).read_bytes()
+    mime_type = sniff(data)
+    if mime_type is None:
+        raise ValueError(f"{attachment.file_id} isn't a JPEG, PNG or WebP")
+    return RequestImage(label=IMAGE_RECENT, mime_type=mime_type, data=data)
+
+
 def context_for(case: Case, fixture: Fixture) -> list[Block]:
     recent, replied = list(fixture.recent), None
     if case.reply_to is not None:
         replied = next(m for m in recent if m.message_id == case.reply_to)
         recent = [m for m in recent if m.message_id != case.reply_to]
-    return context_blocks(fixture.team, recent=recent, replied=replied)
+    candidate = look_candidate(case, fixture)
+    if candidate is not None:
+        recent.append(
+            RecentMessage(
+                message_id=RECENT_IMAGE_ID,
+                sender=ChatUser(
+                    platform="telegram", user_id="annie", display_name=fixture.names["annie"]
+                ),
+                text=case.recent_image_text,
+                sent_at=datetime.now(UTC) - timedelta(minutes=2),
+                attachments=(candidate,),
+            )
+        )
+    return context_blocks(
+        fixture.team,
+        recent=recent,
+        replied=replied,
+        media=candidate is not None,
+        look_at=RECENT_IMAGE_ID if candidate else None,
+    )
 
 
 def images_for(case: Case) -> list[RequestImage]:
@@ -323,6 +379,9 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         raise ValueError(f"case {raw['id']}: no image {image}")
     if image_from not in ("own", "reply"):
         raise ValueError(f"case {raw['id']}: image_from is own or reply")
+    recent_image = raw.get("recent_image")
+    if recent_image is not None and not (IMAGES_DIR / recent_image).is_file():
+        raise ValueError(f"case {raw['id']}: no image {recent_image}")
     return Case(
         id=raw["id"],
         category=raw["category"],
@@ -332,6 +391,9 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         reply_to=reply_to,
         image=image,
         image_from=image_from,
+        recent_image=recent_image,
+        recent_image_text=raw.get("recent_image_text", ""),
+        look=raw.get("look"),
     )
 
 

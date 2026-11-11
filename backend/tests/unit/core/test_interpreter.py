@@ -12,6 +12,7 @@ from chirpo.core.actions import (
     CreateIssue,
     IssueRef,
     ListIssues,
+    LookAtRecentImage,
     MyIssues,
     NotARequest,
     Proposal,
@@ -679,3 +680,158 @@ async def test_the_note_also_comes_with_nothing_to_do() -> None:
     voice = Attachment(kind=AttachmentKind.VOICE, file_id="V", mime_type="audio/ogg", size=10)
     reply = await world.say("thanks!", attachments=(voice,))
     assert reply.endswith(messages.FILES_NOT_READ)
+
+
+async def sent_before(
+    world: "World",
+    *attachments: Attachment,
+    minutes_ago: float = 2,
+    text: str = "crash on checkout",
+) -> None:
+    """Annie's message with a screenshot, in the buffer, a little while ago."""
+    workspace = await world.workspaces.for_chat(CHAT)
+    assert workspace is not None
+    when = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    earlier = make_message(
+        text, sender=ANNIE, event_id="e50", message_id="50", sent_at=when, attachments=attachments
+    )
+    await world.buffer.remember(workspace.id, earlier)
+
+
+async def test_a_request_that_refers_to_a_recent_image_looks_at_it() -> None:
+    from chirpo.core.llm import IMAGE_RECENT
+
+    world = World([LookAtRecentImage()], [CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files["SHOT"] = PNG
+    await sent_before(world, SHOT)
+
+    reply = await world.say("log that as a bug")
+
+    assert reply.startswith(messages.DRY_RUN_HEADER)
+    first, second = world.llm.requests
+    assert "[image, can be looked at]" in first.message
+    assert first.images == ()
+    assert [(i.label, i.data) for i in second.images] == [(IMAGE_RECENT, PNG)]
+    assert world.messaging.downloads == [("SHOT", 4 * 1024 * 1024)]
+
+
+async def test_nothing_is_downloaded_when_the_request_has_nothing_to_do_with_the_image() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files["SHOT"] = PNG
+    await sent_before(world, SHOT)
+    await world.say("checkout crashes on Android 13")  # the model doesn't ask to look
+    assert world.messaging.downloads == []
+    assert len(world.llm.requests) == 1
+
+
+async def test_both_calls_count_toward_the_token_budget() -> None:
+    from chirpo.core.ratelimit import Limits, RateLimiter
+
+    world = World()
+    world.llm = FakeLLM([LookAtRecentImage()], [CHECKOUT], tokens=(3_000, 100))
+    world.services = replace(world.services, llm=world.llm)
+    await world.linked()
+    seeing(world)
+    world.messaging.files["SHOT"] = PNG
+    await sent_before(world, SHOT)
+    counters = FakeCounters()
+    rates = RateLimiter(counters, Limits(0, 0, 100_000, 0))
+    world.services = replace(world.services, limits=rates)
+    await world.say("log that as a bug")
+    assert sum(v for k, v in counters.values.items() if ":tokens:" in k) == 6_200
+
+
+async def test_the_tool_isnt_offered_when_the_image_is_too_old() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    await sent_before(world, SHOT, minutes_ago=12)
+    await world.say("log that as a bug")
+    request = world.llm.requests[0]
+    assert "can be looked at" not in request.message
+    assert "look_at_recent_image" not in {tool.name for tool in request.tools}
+
+
+async def test_the_tool_isnt_offered_when_images_are_off() -> None:
+    world = World([CHECKOUT])
+    await world.linked()  # read_images stays off
+    await sent_before(world, SHOT)
+    await world.say("log that as a bug")
+    request = world.llm.requests[0]
+    assert "[image" not in request.message
+    assert "look_at_recent_image" not in {tool.name for tool in request.tools}
+
+
+async def test_the_tool_isnt_offered_when_the_team_keeps_no_context() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    await sent_before(world, SHOT)
+    workspace = await world.workspaces.for_chat(CHAT)
+    assert workspace is not None
+    await world.workspaces.set_keeps_context(workspace.id, keep=False)
+    await world.say("log that as a bug")
+    assert "look_at_recent_image" not in {tool.name for tool in world.llm.requests[0].tools}
+
+
+async def test_an_image_sent_with_the_request_makes_looking_back_unnecessary() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    world.messaging.files |= {"SHOT": PNG, "OTHER": JPEG}
+    other = Attachment(kind=AttachmentKind.IMAGE, file_id="OTHER", mime_type="image/jpeg", size=9)
+    await sent_before(world, SHOT)
+    await world.say("log this as a bug", attachments=(other,))
+    request = world.llm.requests[0]
+    assert len(request.images) == 1
+    assert "look_at_recent_image" not in {tool.name for tool in request.tools}
+
+
+async def test_a_recent_image_that_cant_be_fetched_is_said_and_nothing_is_guessed() -> None:
+    world = World([LookAtRecentImage()], [CHECKOUT])
+    await world.linked()
+    seeing(world)  # no bytes for SHOT: the platform "no longer has" it
+    await sent_before(world, SHOT)
+    reply = await world.say("log that as a bug")
+    assert reply == messages.IMAGE_UNAVAILABLE
+    assert len(world.llm.requests) == 1
+
+
+async def test_looking_back_is_limited_to_the_same_topic() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    seeing(world)
+    workspace = await world.workspaces.for_chat(CHAT)
+    assert workspace is not None
+    elsewhere = CHAT.model_copy(update={"thread_id": "77"})
+    photo_there = make_message(
+        "crash",
+        sender=ANNIE,
+        chat=elsewhere,
+        event_id="e9",
+        message_id="9",
+        sent_at=datetime.now(UTC),
+        attachments=(SHOT,),
+    )
+    await world.buffer.remember(workspace.id, photo_there)
+    await world.say("log that as a bug")
+    assert "look_at_recent_image" not in {tool.name for tool in world.llm.requests[0].tools}
+
+
+async def test_a_failed_look_back_still_costs_the_first_calls_tokens() -> None:
+    from chirpo.core.ratelimit import Limits, RateLimiter
+
+    world = World()
+    world.llm = FakeLLM([LookAtRecentImage()], tokens=(3_000, 100))
+    world.services = replace(world.services, llm=world.llm)
+    await world.linked()
+    seeing(world)  # no bytes for SHOT: the fetch fails
+    await sent_before(world, SHOT)
+    counters = FakeCounters()
+    world.services = replace(world.services, limits=RateLimiter(counters, Limits(0, 0, 100_000, 0)))
+    assert await world.say("log that as a bug") == messages.IMAGE_UNAVAILABLE
+    assert sum(v for k, v in counters.values.items() if ":tokens:" in k) == 3_100

@@ -19,7 +19,6 @@ from chirpo.core.errors import (
     LLMUnavailableError,
 )
 from chirpo.core.llm import Interpretation, interpret_request
-from chirpo.core.tools import tool_specs
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "gemini"
 KEY = "AIzaSyEXAMPLE-not-a-real-key-000000000"
@@ -83,9 +82,9 @@ class TestRequest:
         assert body["contents"] == [{"role": "user", "parts": [{"text": request.message}]}]
         assert body["toolConfig"] == {"functionCallingConfig": {"mode": "ANY"}}
         declarations = body["tools"][0]["functionDeclarations"]
-        assert [d["name"] for d in declarations] == [tool.name for tool in tool_specs()]
+        assert [d["name"] for d in declarations] == [tool.name for tool in request.tools]
         first = declarations[0]
-        assert first["description"] == tool_specs()[0].description
+        assert first["description"] == request.tools[0].description
         assert first["parametersJsonSchema"]["type"] == "object"
         assert "temperature" not in body.get("generationConfig", {})
 

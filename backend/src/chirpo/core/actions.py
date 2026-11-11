@@ -187,6 +187,10 @@ class NotARequest(Proposal):
     pass
 
 
+class LookAtRecentImage(Proposal):
+    """No fields: chirpo knows which image (D52)."""
+
+
 @dataclass(frozen=True, slots=True)
 class ActionSpec:
     name: str
@@ -258,6 +262,15 @@ _SPECS = (
         "not_a_request",
         NotARequest,
         "The message asks for nothing chirpo can do.",
+        None,
+        False,
+    ),
+    ActionSpec(
+        "look_at_recent_image",
+        LookAtRecentImage,
+        "Look at the image marked 'can be looked at' in recent_messages, when the message refers "
+        "to it ('this', 'that screenshot', 'log that as a bug') and no image is attached. Call it "
+        "alone; you get the picture and ask again. Only available when such an image exists.",
         None,
         False,
     ),

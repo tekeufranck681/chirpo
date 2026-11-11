@@ -16,17 +16,22 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 
+from chirpo.core.domain import Attachment
 from chirpo.core.errors import LLMError, LLMRateLimitedError
-from chirpo.core.llm import Interpretation, interpret_request
+from chirpo.core.lookback import Asked
+from chirpo.core.lookback import interpret as ask_with_lookback
 from chirpo.core.ports import LLMProvider
+from chirpo.core.vision import Seen
 from evals.scoring import (
     Case,
     Fixture,
     Verdict,
     context_for,
     describe,
+    fetch_eval_image,
     images_for,
     load,
+    look_candidate,
     score,
     sender_name,
 )
@@ -48,6 +53,7 @@ class Result:
     seconds: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
+    looked: bool = False
 
 
 class QuotaUsedUp(Exception):
@@ -98,17 +104,24 @@ async def run_cases(
 
 
 async def _run_one(llm: LLMProvider, case: Case, fixture: Fixture, sleep: Sleep) -> Result:
-    request = interpret_request(
-        case.text,
-        sender_name(case, fixture),
-        context=context_for(case, fixture),
-        images=images_for(case),
-    )
+    candidate = look_candidate(case, fixture)
+
+    async def fetch(attachment: Attachment) -> Seen:
+        return Seen((fetch_eval_image(attachment),), [])
+
     tries = 1
     while True:
         start = time.perf_counter()
         try:
-            interpretation = await llm.interpret(request)
+            asked = await ask_with_lookback(
+                llm,
+                text=case.text,
+                sender=sender_name(case, fixture),
+                context=context_for(case, fixture),
+                images=images_for(case),
+                candidate=candidate,
+                fetch=fetch,
+            )
         except LLMRateLimitedError as error:
             if tries == RATE_LIMIT_TRIES:
                 raise
@@ -118,17 +131,24 @@ async def _run_one(llm: LLMProvider, case: Case, fixture: Fixture, sleep: Sleep)
             continue
         except LLMError as error:
             return _failed(case, error)
-        return _scored(case, fixture, interpretation, time.perf_counter() - start)
+        return _scored(case, fixture, asked, time.perf_counter() - start)
 
 
-def _scored(case: Case, fixture: Fixture, answer: Interpretation, seconds: float) -> Result:
+def _scored(case: Case, fixture: Fixture, asked: Asked, seconds: float) -> Result:
+    answer = asked.interpretation
+    verdict = score(case, answer.proposals, fixture)
+    if case.look is not None and case.look != asked.looked:
+        verdict.passed = False
+        said = "should have" if case.look else "shouldn't have"
+        verdict.problems.insert(0, f"{said} looked at the recent image")
     return Result(
         case=case,
-        verdict=score(case, answer.proposals, fixture),
+        verdict=verdict,
         answer=[describe(p) for p in answer.proposals],
         seconds=seconds,
         tokens_in=answer.input_tokens,
         tokens_out=answer.output_tokens,
+        looked=asked.looked,
     )
 
 

@@ -21,6 +21,8 @@ MAX_SENDER_CHARS = 100
 
 IMAGE_OWN = "Image attached to the chat message:"
 IMAGE_REPLIED = "Image attached to the message being replied to:"
+IMAGE_RECENT = "Most recent image in the chat, which the chat message may refer to:"
+LOOK_TOOL = "look_at_recent_image"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,9 +62,11 @@ def interpret_request(
     *,
     context: Sequence[tuple[str, str]] = (),
     images: Sequence[RequestImage] = (),
+    look: bool = False,
     marker: str | None = None,
 ) -> InterpretRequest:
-    """`context`: (kind, body) blocks from `core.context`, each wrapped like the message."""
+    """`context`: (kind, body) blocks from `core.context`, each wrapped like the message.
+    `look`: offer the tool that asks to see the most recent image (D52)."""
     marker = marker or secrets.token_hex(8)
     body = f"From: {_sender(sender)}\n{_clip(text)}"
     blocks = [_untrusted(kind, content, marker) for kind, content in context]
@@ -70,7 +74,7 @@ def interpret_request(
     return InterpretRequest(
         instructions=f"{system_prompt()}\n\nThis request's marker is `{marker}`.",
         message="\n\n".join(blocks),
-        tools=tool_specs(),
+        tools=tool_specs() if look else tuple(t for t in tool_specs() if t.name != LOOK_TOOL),
         images=tuple(images),
     )
 

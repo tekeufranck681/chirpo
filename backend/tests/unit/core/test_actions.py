@@ -15,6 +15,7 @@ from chirpo.core.actions import (
     CreateIssues,
     IssueRef,
     ListIssues,
+    LookAtRecentImage,
     MyIssues,
     NotARequest,
     Proposal,
@@ -52,6 +53,7 @@ class TestRegistry:
             "my_issues",
             "ask_clarifying_question",
             "not_a_request",
+            "look_at_recent_image",
         }
 
     @pytest.mark.parametrize(
@@ -340,6 +342,7 @@ class TestParseToolCall:
             "my_issues": {"state": "closed"},
             "ask_clarifying_question": {"question": "Which Franck?"},
             "not_a_request": {},
+            "look_at_recent_image": {},
         }
         assert set(examples) == set(ACTIONS)
         for name, arguments in examples.items():
@@ -394,3 +397,9 @@ class TestParseToolCall:
         proposal = parse_tool_call("reopen_issue", {"issue": {"number": 12.0}})
         assert isinstance(proposal, ReopenIssue)
         assert proposal.issue.number == 12
+
+
+def test_looking_at_an_image_needs_no_permission_and_no_confirmation() -> None:
+    spec = ACTIONS["look_at_recent_image"]
+    assert (spec.permission, spec.needs_confirmation) == (None, False)
+    assert permission_of(LookAtRecentImage()) is None

@@ -12,6 +12,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 from chirpo.core import messages
 from chirpo.core.actions import permission_of
@@ -26,7 +27,7 @@ from chirpo.core.commands.base import (
     needs_services,
 )
 from chirpo.core.context import MAX_ISSUES, Block, Team, context_blocks, default_of
-from chirpo.core.domain import AuditResult, IssueQuery, RecentMessage, RepoRef
+from chirpo.core.domain import Attachment, AuditResult, IssueQuery, RecentMessage, RepoRef
 from chirpo.core.dryrun import describe
 from chirpo.core.errors import (
     CodeHostError,
@@ -37,11 +38,13 @@ from chirpo.core.errors import (
     MessagingError,
 )
 from chirpo.core.listing import is_read, run_read
-from chirpo.core.llm import Interpretation, RequestImage, interpret_request
+from chirpo.core.llm import Interpretation, RequestImage
+from chirpo.core.lookback import Asked, Charge, recent_image
+from chirpo.core.lookback import interpret as ask_with_lookback
 from chirpo.core.permissions import Action
 from chirpo.core.ports import LLMProvider
 from chirpo.core.resolution import Question, resolve
-from chirpo.core.vision import Seen, gather_images
+from chirpo.core.vision import Seen, gather_images, gather_recent
 from chirpo.core.workspaces import LinkedRepo
 
 RECENT_MESSAGES = 20
@@ -132,22 +135,35 @@ async def _answer_timed(
     seen = seen_task.result()
     team = Team(members=members.result(), repos=repos, open_issues=open_issues)
     timer.lap("context")
-    interpretation = await _ask_model(
+    # An image nobody attached is only looked at if the model asks (D52).
+    look = None
+    if services.read_images and not seen.images:
+        look = recent_image(recent, now=datetime.now(UTC))
+    asked = await _ask_model(
         request,
         llm,
         request.message.text,
-        context=context_blocks(team, recent=recent, replied=replied),
+        context=context_blocks(
+            team,
+            recent=recent,
+            replied=replied,
+            media=services.read_images,
+            look_at=look.message_id if look else None,
+        ),
         images=seen.images,
+        candidate=look.attachment if look else None,
+        charge=_charger(services, actor),
     )
     notes = seen.notes
     del seen  # the image bytes are done with
     timer.lap("model")
-    if interpretation is None:
+    if asked is None:
         return
-    if services.limits is not None:
-        await services.limits.add_tokens(
-            actor.workspace.id, interpretation.input_tokens + interpretation.output_tokens
-        )
+    interpretation = asked.interpretation
+    notes = [*notes, *asked.notes]
+    if asked.failed:  # the model wanted an image that couldn't be fetched
+        await request.reply("\n".join(notes) or messages.IMAGE_UNAVAILABLE)
+        return
 
     async def can_read(repo: RepoRef) -> bool:
         return await allowed(request, actor, Action.VIEW, repo)
@@ -217,6 +233,15 @@ async def _typing(request: Request) -> AsyncIterator[None]:
             await task
 
 
+def _charger(services: Services, actor: Actor) -> Charge:
+    async def charge(answer: Interpretation) -> None:
+        if services.limits is not None:
+            tokens = answer.input_tokens + answer.output_tokens
+            await services.limits.add_tokens(actor.workspace.id, tokens)
+
+    return charge
+
+
 async def _seen(request: Request, services: Services) -> Seen:
     if not services.read_images:
         return Seen((), [])
@@ -250,11 +275,26 @@ async def _ask_model(
     *,
     context: list[Block],
     images: Sequence[RequestImage],
-) -> Interpretation | None:
-    """The model's proposals, or None after telling the person why there are none."""
+    candidate: Attachment | None,
+    charge: Charge,
+) -> Asked | None:
+    """The model's answer, or None after telling the person why there is none."""
     sender = request.message.sender.display_name
+
+    async def fetch(attachment: Attachment) -> Seen:
+        return await gather_recent(request.messaging, attachment)
+
     try:
-        return await llm.interpret(interpret_request(text, sender, context=context, images=images))
+        return await ask_with_lookback(
+            llm,
+            text=text,
+            sender=sender,
+            context=context,
+            images=images,
+            candidate=candidate,
+            fetch=fetch,
+            charge=charge,
+        )
     except LLMRateLimitedError:
         await request.reply(messages.LLM_BUSY)
     except LLMRefusedError:
