@@ -18,3 +18,22 @@ from chirpo.core import messages
 )
 def test_waits_are_said_in_plain_words(seconds: int, text: str) -> None:
     assert messages.duration(seconds) == text
+
+
+def test_no_text_is_defined_twice() -> None:
+    """A second definition silently replaces the first for every user of the name."""
+    import ast
+    from pathlib import Path
+
+    from chirpo.core import messages
+
+    tree = ast.parse(Path(messages.__file__).read_text())
+    names = [
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+    duplicated = sorted({name for name in names if names.count(name) > 1})
+    assert not duplicated, f"defined more than once in messages.py: {duplicated}"

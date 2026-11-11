@@ -175,6 +175,86 @@ async def test_the_outcome_is_stored(stores: Stores) -> None:
     assert done.result == {"lines": ["Closed #7."], "problem": None}
 
 
+async def move(
+    stores: Stores, row: PendingAction, workspace: Workspace, *path: PendingStatus
+) -> None:
+    """Walks a proposal through states, each from the one before."""
+    current = PendingStatus.PROPOSED
+    for to in path:
+        moved = await stores.pending.advance(workspace.id, row.id, expect=current, to=to, now=NOW)
+        assert moved is not None
+        current = to
+
+
+LONG_AGO = datetime(2000, 1, 1, tzinfo=UTC)
+FAR_AHEAD = datetime(2100, 1, 1, tzinfo=UTC)  # "everything is older than this"
+
+
+async def test_a_card_is_found_by_the_message_it_is_on(stores: Stores) -> None:
+    row, workspace, _ = await propose(stores)
+    await stores.pending.attach_message(workspace.id, row.id, "314")
+    chat = row.chat
+    found = await stores.pending.find_by_card(workspace.id, chat, "314")
+    assert found is not None and found.id == row.id
+    assert await stores.pending.find_by_card(workspace.id, chat, "315") is None
+    other_chat = chat.model_copy(update={"chat_id": "-999"})
+    assert await stores.pending.find_by_card(workspace.id, other_chat, "314") is None
+    other, _, _ = await team(stores, user_id="12")
+    assert await stores.pending.find_by_card(other.id, chat, "314") is None
+
+
+async def test_the_sweep_expires_only_waiting_proposals_that_ran_out_of_time(
+    stores: Stores,
+) -> None:
+    late, workspace, _ = await propose(stores, expires_in=timedelta(minutes=5))
+    fresh, _, _ = await propose(stores, expires_in=timedelta(hours=5))
+    taken, taken_ws, _ = await propose(stores, expires_in=timedelta(minutes=5))
+    await move(stores, taken, taken_ws, PendingStatus.CONFIRMED)
+    # The database is shared with other tests: look at this test's rows only.
+    swept = await stores.pending.expire_due(NOW + timedelta(minutes=10))
+    ids = {row.id for row in swept}
+    assert late.id in ids and fresh.id not in ids and taken.id not in ids
+    assert all(row.status == PendingStatus.EXPIRED for row in swept)
+    again = await stores.pending.expire_due(NOW + timedelta(minutes=10))
+    assert late.id not in {row.id for row in again}  # a row is swept once
+    got = await stores.pending.get(workspace.id, late.id)
+    assert got is not None and got.status == PendingStatus.EXPIRED
+
+
+async def test_the_sweep_fails_runs_that_never_finished(stores: Stores) -> None:
+    stuck, ws1, _ = await propose(stores)
+    await move(stores, stuck, ws1, PendingStatus.CONFIRMED, PendingStatus.EXECUTING)
+    half, ws2, _ = await propose(stores)
+    await move(stores, half, ws2, PendingStatus.CONFIRMED)
+    waiting, _, _ = await propose(stores)
+    done, ws3, _ = await propose(stores)
+    await move(
+        stores, done, ws3, PendingStatus.CONFIRMED, PendingStatus.EXECUTING, PendingStatus.EXECUTED
+    )
+    assert await stores.pending.fail_stuck(LONG_AGO) == []  # not old enough yet
+    failed = await stores.pending.fail_stuck(FAR_AHEAD)
+    ids = {row.id for row in failed}
+    assert {stuck.id, half.id} <= ids
+    assert waiting.id not in ids and done.id not in ids
+    assert all(row.status == PendingStatus.FAILED for row in failed)
+    assert all(row.result == {"error": "stuck"} for row in failed)
+    again = await stores.pending.fail_stuck(FAR_AHEAD)
+    assert not {stuck.id, half.id} & {row.id for row in again}  # a row is failed once
+
+
+async def test_the_sweep_deletes_only_old_finished_rows(stores: Stores) -> None:
+    ended, ws1, _ = await propose(stores)
+    await move(stores, ended, ws1, PendingStatus.REJECTED)
+    waiting, ws2, _ = await propose(stores)
+    running, ws3, _ = await propose(stores)
+    await move(stores, running, ws3, PendingStatus.CONFIRMED, PendingStatus.EXECUTING)
+    assert await stores.pending.purge(LONG_AGO) == 0  # nothing is old enough
+    assert await stores.pending.purge(FAR_AHEAD) >= 1
+    assert await stores.pending.get(ws1.id, ended.id) is None
+    assert await stores.pending.get(ws2.id, waiting.id) is not None  # still waiting
+    assert await stores.pending.get(ws3.id, running.id) is not None  # not finished
+
+
 async def test_a_proposal_for_someone_outside_the_workspace_is_refused(stores: Stores) -> None:
     if not stores.is_postgres:
         pytest.skip("a database guarantee")

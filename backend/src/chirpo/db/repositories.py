@@ -21,7 +21,7 @@ from chirpo.core.domain import (
 )
 from chirpo.core.errors import LastAdminError
 from chirpo.core.llm import MAX_MESSAGE_CHARS
-from chirpo.core.pending import PendingAction, PendingStatus, Step
+from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 from chirpo.db import models as db
@@ -653,6 +653,58 @@ class SqlPendingActions:
             )
             return _to_pending(row) if row is not None else None
 
+    async def find_by_card(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> PendingAction | None:
+        async with self._sessions() as session:
+            row = await session.scalar(
+                select(db.PendingAction).where(
+                    db.PendingAction.workspace_id == workspace_id,
+                    db.PendingAction.platform == chat.platform,
+                    db.PendingAction.chat_id == chat.chat_id,
+                    db.PendingAction.thread_id.is_not_distinct_from(chat.thread_id),
+                    db.PendingAction.message_id == message_id,
+                )
+            )
+            return _to_pending(row) if row is not None else None
+
+    async def expire_due(self, now: datetime) -> list[PendingAction]:
+        # One UPDATE: each row is expired by exactly one sweep, and never one that was just
+        # confirmed (that no longer matches status = 'proposed').
+        return await self._sweep(
+            db.PendingAction.status == PendingStatus.PROPOSED.value,
+            db.PendingAction.expires_at <= now,
+            status=PendingStatus.EXPIRED.value,
+        )
+
+    async def fail_stuck(self, before: datetime) -> list[PendingAction]:
+        return await self._sweep(
+            db.PendingAction.status.in_([status.value for status in RUNNING]),
+            db.PendingAction.updated_at < before,
+            status=PendingStatus.FAILED.value,
+            result={"error": "stuck"},
+        )
+
+    async def purge(self, before: datetime) -> int:
+        async with self._sessions.begin() as session:
+            deleted = await session.execute(
+                delete(db.PendingAction).where(
+                    db.PendingAction.status.in_([status.value for status in FINISHED]),
+                    db.PendingAction.updated_at < before,
+                )
+            )
+            return deleted.rowcount  # type: ignore[attr-defined,no-any-return]
+
+    async def _sweep(self, *conditions: ColumnElement[bool], **values: Any) -> list[PendingAction]:
+        async with self._sessions.begin() as session:
+            rows = await session.scalars(
+                update(db.PendingAction)
+                .where(*conditions)
+                .values(**values)
+                .returning(db.PendingAction)
+            )
+            return [_to_pending(row) for row in rows]
+
     async def advance(
         self,
         workspace_id: UUID,
@@ -701,5 +753,6 @@ def _to_pending(row: db.PendingAction) -> PendingAction:
         status=PendingStatus(row.status),
         confirmed_by=row.confirmed_by,
         expires_at=row.expires_at,
+        updated_at=row.updated_at,
         result=row.result,
     )

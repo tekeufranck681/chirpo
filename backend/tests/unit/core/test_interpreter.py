@@ -97,6 +97,7 @@ class World:
 
     async def say(self, text: str, sender: ChatUser = FRANCK, **fields: object) -> str:
         self.messaging.sent.clear()
+        fields.setdefault("sent_at", datetime.now(UTC))  # a message from just now, not 2026-01-01
         message = make_message(text, sender=sender, mentions_bot=True, **fields)
         await handle_inbound(message, self.messaging, self.services)
         return self.messaging.sent[-1][1] if self.messaging.sent else ""

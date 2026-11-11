@@ -43,7 +43,7 @@ from chirpo.core.errors import (
     MessagingForbiddenError,
 )
 from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
-from chirpo.core.pending import PendingAction, PendingStatus, Step
+from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
 
@@ -89,6 +89,8 @@ class FakeMessaging:
         self.downloads: list[tuple[str, int]] = []  # (file id, size limit) asked for
         self.unreachable_chats: set[str] = set()  # e.g. private chats never opened with the bot
         self.chat_admins: set[str] = set()  # user ids that run the group
+        self._sent_total = 0
+        self.last_id = ""  # the id of the message sent last
         self.buttons: dict[str, tuple[Button, ...]] = {}  # message id -> buttons it shows now
         self.answered: list[tuple[InboundCallback, str | None]] = []
 
@@ -106,7 +108,9 @@ class FakeMessaging:
         if chat.chat_id in self.unreachable_chats:
             raise MessagingForbiddenError(f"can't message {chat.chat_id}")
         self.sent.append((chat, text, reply_to))
-        message_id = str(100 + len(self.sent))
+        self._sent_total += 1  # `sent` gets cleared by tests; ids must stay unique
+        message_id = str(100 + self._sent_total)
+        self.last_id = message_id
         self.buttons[message_id] = tuple(buttons)
         return SentMessage(chat=chat, message_id=message_id)
 
@@ -167,6 +171,7 @@ class FakePendingActions:
             chat=chat,
             steps=tuple(steps),
             expires_at=expires_at,
+            updated_at=datetime.now(UTC),
         )
         self.rows[row.id] = row
         return row
@@ -178,6 +183,47 @@ class FakePendingActions:
     async def get(self, workspace_id: UUID, pending_id: UUID) -> PendingAction | None:
         row = self.rows.get(pending_id)
         return row if row is not None and row.workspace_id == workspace_id else None
+
+    async def find_by_card(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> PendingAction | None:
+        return next(
+            (
+                row
+                for row in self.rows.values()
+                if row.workspace_id == workspace_id
+                and row.chat == chat
+                and row.message_id == message_id
+            ),
+            None,
+        )
+
+    def _move(
+        self, rows: list[PendingAction], to: PendingStatus, **changes: Any
+    ) -> list[PendingAction]:
+        for row in rows:
+            self.rows[row.id] = row.model_copy(
+                update={"status": to, "updated_at": datetime.now(UTC), **changes}
+            )
+        return [self.rows[row.id] for row in rows]
+
+    async def expire_due(self, now: datetime) -> list[PendingAction]:
+        due = [
+            r
+            for r in self.rows.values()
+            if r.status == PendingStatus.PROPOSED and r.is_expired(now)
+        ]
+        return self._move(due, PendingStatus.EXPIRED)
+
+    async def fail_stuck(self, before: datetime) -> list[PendingAction]:
+        stuck = [r for r in self.rows.values() if r.status in RUNNING and r.updated_at < before]
+        return self._move(stuck, PendingStatus.FAILED, result={"error": "stuck"})
+
+    async def purge(self, before: datetime) -> int:
+        old = [r.id for r in self.rows.values() if r.status in FINISHED and r.updated_at < before]
+        for pending_id in old:
+            del self.rows[pending_id]
+        return len(old)
 
     async def advance(
         self,
@@ -195,7 +241,7 @@ class FakePendingActions:
             return None
         if expect == PendingStatus.PROPOSED and to != PendingStatus.EXPIRED and row.is_expired(now):
             return None
-        changes: dict[str, Any] = {"status": to}
+        changes: dict[str, Any] = {"status": to, "updated_at": now}
         if by is not None:
             changes["confirmed_by"] = by
         if result is not None:

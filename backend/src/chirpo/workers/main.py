@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import httpx
@@ -18,6 +18,7 @@ from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
 from chirpo.core.ratelimit import Limits, RateLimiter
+from chirpo.core.sweep import sweep
 from chirpo.db.repositories import (
     SqlAuditLog,
     SqlMembers,
@@ -85,6 +86,15 @@ async def prune_message_buffer(ctx: dict[str, Any]) -> int:
     return deleted
 
 
+async def expire_pending(ctx: dict[str, Any]) -> int:
+    """Expires old cards, fails cut-off runs and deletes old finished rows (M5.4)."""
+    services = ctx.get("services")
+    if services is None:  # GitHub isn't configured, so there are no cards
+        return 0
+    swept = await sweep(services.pending, ctx["messaging"], datetime.now(UTC))
+    return swept.expired + swept.failed + swept.purged
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings)
@@ -147,6 +157,7 @@ async def _services(ctx: dict[str, Any], settings: Settings) -> Services | None:
         llm=llm_from_settings(settings, client=ctx["http"]),
         read_images=settings.read_images,
         proposal_ttl=timedelta(minutes=settings.proposal_ttl_minutes),
+        stale_after=timedelta(minutes=settings.stale_after_minutes),
         limits=RateLimiter(
             RedisCounters(ctx["redis"]),
             Limits(
@@ -195,6 +206,7 @@ class WorkerSettings:
     cron_jobs: ClassVar[list[Any]] = [
         cron(prune_processed_events, hour=3, minute=17),
         cron(prune_message_buffer, minute=7),  # hourly
+        cron(expire_pending, minute=set(range(0, 60, 5))),
     ]
     on_startup = startup
     on_shutdown = shutdown

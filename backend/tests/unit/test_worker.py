@@ -112,3 +112,45 @@ async def test_pruning_without_a_buffer_does_nothing() -> None:
     from chirpo.workers.main import prune_message_buffer
 
     assert await prune_message_buffer({}) == 0
+
+
+def test_cards_are_tidied_every_five_minutes() -> None:
+    from chirpo.workers.main import expire_pending
+
+    [job] = [job for job in WorkerSettings.cron_jobs if job.coroutine is expire_pending]
+    assert job.minute == set(range(0, 60, 5))
+    assert job.hour is None
+
+
+async def test_tidying_the_cards() -> None:
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from chirpo.core.actions import CloseIssue, IssueRef
+    from chirpo.core.domain import RepoRef
+    from chirpo.core.pending import PendingStatus, Step
+    from chirpo.workers.main import expire_pending
+    from tests.fakes import CHAT, FakeMessaging, FakePendingActions
+
+    repo = RepoRef.parse("github", "tekeufranck681/chirpo-sandbox")
+    store = FakePendingActions()
+    row = await store.create(
+        workspace_id=uuid4(),
+        requested_by=uuid4(),
+        chat=CHAT,
+        steps=[Step.of(CloseIssue(repo=repo.full_name, issue=IssueRef(number=1)), repo)],
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    await store.attach_message(row.workspace_id, row.id, "77")
+    messaging = FakeMessaging()
+    ctx = {"services": SimpleNamespace(pending=store), "messaging": {CHAT.platform: messaging}}
+    assert await expire_pending(ctx) == 1
+    assert store.rows[row.id].status == PendingStatus.EXPIRED
+    assert len(messaging.edited) == 1
+
+
+async def test_tidying_without_github_configured_does_nothing() -> None:
+    from chirpo.workers.main import expire_pending
+
+    assert await expire_pending({"services": None}) == 0

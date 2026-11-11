@@ -4,12 +4,14 @@ Everything here was written by chat users or comes from the code host, so it is 
 block is capped in size and later wrapped in a marker-named block by `interpret_request`.
 """
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from chirpo.core.actions import unsafe_char
 from chirpo.core.domain import AttachmentKind, Issue, RecentMessage, RepoRef
 from chirpo.core.images import can_read
+from chirpo.core.pending import Step
 from chirpo.core.workspaces import LinkedRepo, Member
 
 MAX_MEMBERS = 50
@@ -17,6 +19,7 @@ MAX_ISSUES = 30
 MAX_ISSUE_LINE = 300
 MAX_MESSAGE_LINE = 500
 MAX_NAME = 100
+MAX_PROPOSAL_CHARS = 40_000  # a card bigger than this isn't changed by reply: nothing is cut
 
 Block = tuple[str, str]  # (kind, body)
 
@@ -44,6 +47,7 @@ def context_blocks(
     replied: RecentMessage | None,
     media: bool = False,
     look_at: str | None = None,
+    proposal: Sequence[Step] | None = None,
 ) -> list[Block]:
     """`media`: say which messages came with files; `look_at`: the message whose image chirpo
     can look at if the request refers to it (D52)."""
@@ -57,7 +61,24 @@ def context_blocks(
         blocks.append(("recent_messages", said))
     if replied is not None:
         blocks.append(("replied_message", _said(replied, media=media)))
+    if proposal is not None:
+        blocks.append(("pending_proposal", "\n".join(_step(step) for step in proposal)))
     return blocks
+
+
+def _step(step: Step) -> str:
+    """A stored step as one line: its tool and arguments, as the model would have called it."""
+    return clean(
+        f"- {step.action} {json.dumps(step.proposal, ensure_ascii=False)}", MAX_PROPOSAL_CHARS
+    )
+
+
+def proposal_size(steps: Sequence[Step]) -> int:
+    """What `pending_proposal` would weigh, before any cap: the model is told to copy it, so a
+    proposal that is too big is refused rather than cut."""
+    return sum(
+        len(f"- {step.action} {json.dumps(step.proposal, ensure_ascii=False)}") for step in steps
+    )
 
 
 def _member(member: Member) -> str:

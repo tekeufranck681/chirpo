@@ -26,6 +26,20 @@ class PendingStatus(StrEnum):
     EXPIRED = "expired"
 
 
+# Nothing happens to a proposal in these states any more.
+FINISHED = frozenset(
+    {
+        PendingStatus.EXECUTED,
+        PendingStatus.FAILED,
+        PendingStatus.REJECTED,
+        PendingStatus.MODIFIED,
+        PendingStatus.EXPIRED,
+    }
+)
+# Between pressing Confirm and the result: a row that stays here was cut off (worker killed).
+RUNNING = frozenset({PendingStatus.CONFIRMED, PendingStatus.EXECUTING})
+
+
 class Step(BaseModel):
     """One resolved proposal, in a form that goes into the database and comes back identical."""
 
@@ -64,6 +78,7 @@ class PendingAction(BaseModel):
     status: PendingStatus = PendingStatus.PROPOSED
     confirmed_by: UUID | None = None
     expires_at: AwareDatetime
+    updated_at: AwareDatetime
     result: dict[str, Any] = Field(default_factory=dict)
 
     def is_expired(self, now: datetime) -> bool:

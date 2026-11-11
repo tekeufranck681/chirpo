@@ -161,3 +161,11 @@ def test_a_proposal_can_be_confirmed_for_an_hour_by_default() -> None:
     for bad in (0, -5, 60 * 24 * 7 + 1):  # it must expire, and not outlive a week
         with pytest.raises(ValidationError):
             make_settings(proposal_ttl_minutes=bad)
+
+
+def test_a_message_is_stale_after_five_minutes_by_default() -> None:
+    assert make_settings().stale_after_minutes == 5
+    assert make_settings(stale_after_minutes=1).stale_after_minutes == 1
+    for bad in (0, -1, 24 * 60 + 1):
+        with pytest.raises(ValidationError):
+            make_settings(stale_after_minutes=bad)

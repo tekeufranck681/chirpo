@@ -249,6 +249,25 @@ class PendingActions(Protocol):
 
     async def get(self, workspace_id: UUID, pending_id: UUID) -> PendingAction | None: ...
 
+    async def find_by_card(
+        self, workspace_id: UUID, chat: ChatRef, message_id: str
+    ) -> PendingAction | None:
+        """The proposal whose card is this message, for replies to a card."""
+        ...
+
+    async def expire_due(self, now: datetime) -> list[PendingAction]:
+        """Marks waiting proposals past their time expired, once each, and returns them."""
+        ...
+
+    async def fail_stuck(self, before: datetime) -> list[PendingAction]:
+        """Marks runs that were confirmed but never finished, untouched since `before`, failed
+        (the worker died mid-run), and returns them."""
+        ...
+
+    async def purge(self, before: datetime) -> int:
+        """Deletes finished proposals untouched since `before`; returns how many."""
+        ...
+
     async def advance(
         self,
         workspace_id: UUID,

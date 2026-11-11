@@ -44,7 +44,7 @@ async def propose(world: World, *, text: str = "log the checkout crash") -> str:
     """Sends a request and returns the id of the card the bot posted."""
     world.codehost.users |= {"tekeufranck681", "annie-gh"}
     await world.say(text)
-    return str(100 + len(world.messaging.sent))
+    return world.messaging.last_id
 
 
 def pending(world: World) -> PendingAction:
@@ -431,3 +431,19 @@ async def test_a_second_press_while_it_is_running_says_so() -> None:
     await first
     assert len(world.codehost.issues) == 1
     assert await press(world, card) == messages.CB_ALREADY  # once it is over: handled
+
+
+async def test_a_message_that_waited_in_the_queue_says_i_was_offline() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    sent = datetime.now(UTC) - timedelta(minutes=10)
+    await world.say("log the checkout crash", sent_at=sent)
+    assert messages.STALE_NOTE in world.messaging.sent[-1][1]
+    assert world.messaging.buttons["101"] != ()  # still a card to confirm
+
+
+async def test_a_fresh_message_has_no_such_note() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    await world.say("log the checkout crash", sent_at=datetime.now(UTC) - timedelta(minutes=2))
+    assert messages.STALE_NOTE not in world.messaging.sent[-1][1]

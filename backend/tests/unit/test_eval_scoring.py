@@ -223,3 +223,56 @@ def test_the_look_back_cases_exist_on_both_sides() -> None:
     must_not = [c for c in CASES if c.look is False]
     assert len(must) >= 3 and len(must_not) >= 2
     assert any(c.category == "injection" for c in must + must_not)
+
+
+# ---------------------------------------------------------------- replying to a card (M5.3)
+
+
+def test_a_case_can_reply_to_a_card_with_these_steps(tmp_path: Path) -> None:
+    text = CASES_FILE.read_text().replace(
+        "cases:\n",
+        """cases:
+  - id: reply-to-card
+    category: modify
+    from: franck
+    pending:
+      - {action: create_issue, title: "Push notifications fail", assignees: [annie-mb]}
+    text: "add the label enhancement"
+    expect:
+      - {action: create_issue, labels: [bug, enhancement]}
+""",
+        1,
+    )
+    path = tmp_path / "cases.yaml"
+    path.write_text(text)
+    fixture, cases = load(path)
+    case_ = next(c for c in cases if c.id == "reply-to-card")
+    block = dict(context_for(case_, fixture))["pending_proposal"]
+    assert block.startswith("- create_issue ")
+    assert "Push notifications fail" in block
+    assert "tekeufranck681/chirpo-sandbox" in block  # the default repo, as a stored step has it
+
+
+def test_a_case_without_a_card_has_no_pending_block() -> None:
+    assert "pending_proposal" not in dict(context_for(case([]), FIXTURE))
+
+
+def test_a_card_step_that_is_not_a_valid_proposal_is_rejected(tmp_path: Path) -> None:
+    text = CASES_FILE.read_text().replace(
+        "cases:\n",
+        """cases:
+  - id: bad-card
+    category: modify
+    from: franck
+    pending:
+      - {action: create_issue, titel: "typo"}
+    text: "x"
+    expect:
+      - {action: not_a_request}
+""",
+        1,
+    )
+    path = tmp_path / "cases.yaml"
+    path.write_text(text)
+    with pytest.raises(ValueError):
+        load(path)

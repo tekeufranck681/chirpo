@@ -46,6 +46,7 @@ class Services:
     limits: RateLimiter | None = None  # None: no rate limits (D49)
     read_images: bool = False  # show images sent with a request to the LLM (D50)
     proposal_ttl: timedelta = timedelta(hours=1)  # how long a card can be confirmed (D53)
+    stale_after: timedelta = timedelta(minutes=5)  # older messages get an "offline" note (D54)
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
 
