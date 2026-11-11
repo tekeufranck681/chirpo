@@ -18,7 +18,15 @@ from chirpo.core.actions import (
     SetStatus,
 )
 from chirpo.core.commands import Services
-from chirpo.core.domain import AuditResult, ChatUser, NewIssue, RepoPermission, RepoRef
+from chirpo.core.domain import (
+    Attachment,
+    AttachmentKind,
+    AuditResult,
+    ChatUser,
+    NewIssue,
+    RepoPermission,
+    RepoRef,
+)
 from chirpo.core.errors import (
     LLMInvalidOutputError,
     LLMRateLimitedError,
@@ -526,4 +534,22 @@ async def test_a_failed_refusal_reply_does_not_break_the_request() -> None:
     await world.say("checkout crashes")
     world.messaging.unreachable_chats = {CHAT.chat_id}
     await world.say("checkout crashes")  # the refusal can't be delivered: no error
+    assert len(world.llm.requests) == 1
+
+
+async def test_a_photo_without_text_is_not_a_request() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    photo = Attachment(kind=AttachmentKind.IMAGE, file_id="P1", mime_type="image/jpeg")
+    assert await world.say("", attachments=(photo,)) == ""
+    assert world.llm.requests == []
+    assert world.messaging.typing == []
+
+
+async def test_a_photo_with_a_caption_is_handled_like_any_request() -> None:
+    world = World([CHECKOUT])
+    await world.linked()
+    photo = Attachment(kind=AttachmentKind.IMAGE, file_id="P1", mime_type="image/jpeg")
+    reply = await world.say("checkout crashes on Android 13", attachments=(photo,))
+    assert reply.startswith(messages.DRY_RUN_HEADER)
     assert len(world.llm.requests) == 1

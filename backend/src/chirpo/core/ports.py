@@ -5,6 +5,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from chirpo.core.domain import (
+    Attachment,
     ChatRef,
     ChatUser,
     InboundEvent,
@@ -45,6 +46,12 @@ class MessagingAdapter(Protocol):
 
     async def show_typing(self, chat: ChatRef) -> None:
         """Show that the bot is working on an answer (a few seconds; best effort)."""
+        ...
+
+    async def download(self, attachment: Attachment, *, max_bytes: int) -> bytes:
+        """The file's bytes. Raises `AttachmentTooLargeError` when a size the platform reported is
+        over `max_bytes` (before downloading), or when the bytes received are (after), and
+        `AttachmentUnavailableError` when the platform no longer has the file."""
         ...
 
     def private_chat(self, user: ChatUser) -> ChatRef:

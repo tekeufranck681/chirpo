@@ -184,6 +184,8 @@ class BufferedMessage(IdMixin, WorkspaceScopedMixin, Base):
     sender_name: Mapped[str] = mapped_column(Text)
     sender_username: Mapped[str | None] = mapped_column(Text)
     text_encrypted: Mapped[str] = mapped_column(Text)
+    # JSON of the files sent with it (id, type, size; never the bytes), encrypted like the text.
+    attachments_encrypted: Mapped[str | None] = mapped_column(Text)
     # sent_at orders messages (never later than received); received_at, set by the database,
     # bounds how long anything is kept whatever date a platform reports. Both serve pruning.
     sent_at: Mapped[datetime] = mapped_column(index=True)

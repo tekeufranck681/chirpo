@@ -1,0 +1,51 @@
+{
+  "update_id": 900020,
+  "message": {
+    "message_id": 20,
+    "from": {
+      "id": 111111,
+      "is_bot": false,
+      "first_name": "Franck",
+      "last_name": "Tekeu",
+      "username": "tekeufranck",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "chirpo test",
+      "type": "supergroup"
+    },
+    "date": 1762600000,
+    "photo": [
+      {
+        "file_id": "S",
+        "file_unique_id": "u1",
+        "file_size": 1500,
+        "width": 90,
+        "height": 51
+      },
+      {
+        "file_id": "M",
+        "file_unique_id": "u2",
+        "file_size": 20000,
+        "width": 320,
+        "height": 180
+      },
+      {
+        "file_id": "L",
+        "file_unique_id": "u3",
+        "file_size": 150000,
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "caption": "@chirpo_test_bot see this",
+    "caption_entities": [
+      {
+        "offset": 0,
+        "length": 16,
+        "type": "mention"
+      }
+    ]
+  }
+}

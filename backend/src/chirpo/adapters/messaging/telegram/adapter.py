@@ -19,6 +19,8 @@ from telegram.error import (
 )
 
 from chirpo.core.domain import (
+    Attachment,
+    AttachmentKind,
     ChatRef,
     ChatUser,
     InboundCallback,
@@ -27,6 +29,8 @@ from chirpo.core.domain import (
     SentMessage,
 )
 from chirpo.core.errors import (
+    AttachmentTooLargeError,
+    AttachmentUnavailableError,
     MessagingError,
     MessagingForbiddenError,
     MessagingRateLimitedError,
@@ -152,6 +156,17 @@ class TelegramAdapter:
             )
         )
 
+    async def download(self, attachment: Attachment, *, max_bytes: int) -> bytes:
+        if attachment.size is not None and attachment.size > max_bytes:
+            raise AttachmentTooLargeError("larger than the limit")
+        file = await _file_call(lambda: self._bot.get_file(attachment.file_id))
+        if file.file_size is not None and file.file_size > max_bytes:
+            raise AttachmentTooLargeError("larger than the limit")
+        data = await _file_call(file.download_as_bytearray)
+        if len(data) > max_bytes:  # no size was given up front: Telegram's own cap is 20 MB
+            raise AttachmentTooLargeError("larger than the limit")
+        return bytes(data)
+
     async def edit_message(self, message: SentMessage, text: str) -> None:
         try:
             await _translate_errors(
@@ -168,7 +183,8 @@ class TelegramAdapter:
 
     def _parse_message(self, update_id: int, message: Message) -> InboundMessage | None:
         text = message.text or message.caption or ""
-        if not text.strip() or message.is_automatic_forward:
+        attachments = _attachments(message)
+        if not (text.strip() or attachments) or message.is_automatic_forward:
             return None
         sender = _sender(message)
         if sender is None:
@@ -193,6 +209,8 @@ class TelegramAdapter:
                 replied and replied.from_user and replied.from_user.id == self._bot_id
             ),
             reply_to_message_id=str(replied.message_id) if replied else None,
+            attachments=attachments,
+            reply_to_attachments=_attachments(replied) if replied else (),
             is_private_chat=message.chat.type == "private",
         )
 
@@ -217,6 +235,37 @@ class TelegramAdapter:
         if match.group("target").lower() != self._bot_username.lower():
             return text, False
         return match.group("command") + text[match.end() :], True
+
+
+def _attachments(message: Message) -> tuple[Attachment, ...]:
+    """Photos, documents and voice messages; anything else Telegram offers is not read."""
+    found: list[Attachment] = []
+    if message.photo:
+        largest = message.photo[-1]  # Telegram lists the sizes smallest first; photos are JPEG
+        found.append(
+            Attachment(
+                kind=AttachmentKind.IMAGE,
+                file_id=largest.file_id,
+                mime_type="image/jpeg",
+                size=largest.file_size,
+            )
+        )
+    if document := message.document:
+        mime = document.mime_type
+        kind = AttachmentKind.IMAGE if mime and mime.startswith("image/") else AttachmentKind.FILE
+        found.append(
+            Attachment(kind=kind, file_id=document.file_id, mime_type=mime, size=document.file_size)
+        )
+    if voice := message.voice:
+        found.append(
+            Attachment(
+                kind=AttachmentKind.VOICE,
+                file_id=voice.file_id,
+                mime_type=voice.mime_type,
+                size=voice.file_size,
+            )
+        )
+    return tuple(found)
 
 
 def _chat_ref(message: Message) -> ChatRef:
@@ -250,6 +299,19 @@ def _sender(message: Message) -> ChatUser | None:
     if message.from_user is None or message.from_user.id == TELEGRAM_SERVICE_USER_ID:
         return None
     return _user(message.from_user)
+
+
+async def _file_call[T](call: Callable[[], Awaitable[T]]) -> T:
+    """Like `_translate_errors`, and Telegram's refusals about the file become attachment errors.
+    The messages are fixed: Telegram's own text can hold the file id or a URL with the bot token."""
+    try:
+        return await _translate_errors(call)
+    except MessagingError as error:
+        if not isinstance(error.__cause__, BadRequest):
+            raise
+        if "too big" in str(error).lower():
+            raise AttachmentTooLargeError("larger than Telegram allows") from None
+        raise AttachmentUnavailableError("Telegram no longer has the file") from None
 
 
 async def _translate_errors[T](call: Callable[[], Awaitable[T]]) -> T:

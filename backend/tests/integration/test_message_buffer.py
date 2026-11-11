@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from chirpo.core.domain import ChatRef, ChatUser, InboundMessage
+from chirpo.core.domain import Attachment, AttachmentKind, ChatRef, ChatUser, InboundMessage
 from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.ports import MessageBuffer, Workspaces
 from chirpo.db import models as db
@@ -238,3 +238,108 @@ async def test_find_one_message(stores: Stores) -> None:
     assert found.text == "the one replied to"
     assert await stores.buffer.find(workspace, chat, "nope") is None
     assert await stores.buffer.find(workspace, new_chat(), sent.message_id) is None
+
+
+PHOTO = Attachment(
+    kind=AttachmentKind.IMAGE, file_id="AgACsecretfileid", mime_type="image/jpeg", size=1234
+)
+VOICE = Attachment(kind=AttachmentKind.VOICE, file_id="AwAD", mime_type="audio/ogg", size=None)
+
+
+async def test_attachments_are_kept_with_the_message(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await workspace_for(stores, chat)
+    sent = message(chat, "crash on checkout", attachments=(PHOTO, VOICE))
+    await stores.buffer.remember(workspace, sent)
+
+    [recent] = await stores.buffer.recent(workspace, chat)
+    assert recent.attachments == (PHOTO, VOICE)
+    found = await stores.buffer.find(workspace, chat, sent.message_id)
+    assert found is not None
+    assert found.attachments == (PHOTO, VOICE)
+
+
+async def test_a_photo_without_text_is_kept(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await workspace_for(stores, chat)
+    await stores.buffer.remember(workspace, message(chat, "", attachments=(PHOTO,)))
+    [recent] = await stores.buffer.recent(workspace, chat)
+    assert (recent.text, recent.attachments) == ("", (PHOTO,))
+
+
+async def test_a_message_without_attachments_reads_back_without(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await workspace_for(stores, chat)
+    await stores.buffer.remember(workspace, message(chat, "just text"))
+    [recent] = await stores.buffer.recent(workspace, chat)
+    assert recent.attachments == ()
+
+
+async def test_attachments_are_encrypted_at_rest_and_forgotten_with_the_message(
+    engine: AsyncEngine,
+) -> None:
+    sessions = create_session_factory(engine)
+    chat = new_chat()
+    workspace = (await SqlWorkspaces(sessions).get_or_create_for_chat(chat, name="Team")).id
+    encryptor = Encryptor([generate_key()])
+    buffer = SqlMessageBuffer(sessions, encryptor, RETENTION)
+    await buffer.remember(workspace, message(chat, "see", attachments=(PHOTO,)))
+    async with sessions() as session:
+        stored = await session.scalar(
+            select(db.BufferedMessage.attachments_encrypted).where(
+                db.BufferedMessage.workspace_id == workspace
+            )
+        )
+    assert stored is not None
+    assert "secretfileid" not in stored
+    assert "secretfileid" in encryptor.decrypt(stored)
+    assert await buffer.forget(workspace) == 1
+    assert await buffer.recent(workspace, chat) == []
+
+
+async def test_a_message_without_attachments_stores_none(engine: AsyncEngine) -> None:
+    sessions = create_session_factory(engine)
+    chat = new_chat()
+    workspace = (await SqlWorkspaces(sessions).get_or_create_for_chat(chat, name="Team")).id
+    buffer = SqlMessageBuffer(sessions, Encryptor([generate_key()]), RETENTION)
+    await buffer.remember(workspace, message(chat, "plain"))
+    async with sessions() as session:
+        stored = await session.scalar(
+            select(db.BufferedMessage.attachments_encrypted).where(
+                db.BufferedMessage.workspace_id == workspace
+            )
+        )
+    assert stored is None
+
+
+@pytest.mark.parametrize("damage", ["garbage", "1", "null", '[{"kind": "image"}]', '{"a": 1}'])
+async def test_unreadable_attachment_metadata_leaves_the_text(
+    engine: AsyncEngine, damage: str
+) -> None:
+    sessions = create_session_factory(engine)
+    chat = new_chat()
+    workspace = (await SqlWorkspaces(sessions).get_or_create_for_chat(chat, name="Team")).id
+    encryptor = Encryptor([generate_key()])
+    buffer = SqlMessageBuffer(sessions, encryptor, RETENTION)
+    await buffer.remember(workspace, message(chat, "see the photo", attachments=(PHOTO,)))
+    token = "not-a-valid-token" if damage == "garbage" else encryptor.encrypt(damage)
+    async with sessions.begin() as session:
+        await session.execute(
+            update(db.BufferedMessage)
+            .where(db.BufferedMessage.workspace_id == workspace)
+            .values(attachments_encrypted=token)
+        )
+    [recent] = await buffer.recent(workspace, chat)
+    assert (recent.text, recent.attachments) == ("see the photo", ())
+
+
+async def test_only_a_few_attachments_are_kept(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await workspace_for(stores, chat)
+    many = tuple(
+        Attachment(kind=AttachmentKind.FILE, file_id=f"F{n}", mime_type=None, size=None)
+        for n in range(30)
+    )
+    await stores.buffer.remember(workspace, message(chat, "a pile", attachments=many))
+    [recent] = await stores.buffer.recent(workspace, chat)
+    assert recent.attachments == many[:10]
