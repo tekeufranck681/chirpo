@@ -155,6 +155,8 @@ ISSUE_FAILED = "GitHub didn't accept that issue ({reason}). Nothing was created.
 # Confirming and running (M5, D53)
 BUTTON_CONFIRM = "✅ Confirm"
 BUTTON_CANCEL = "✖ Cancel"
+BUTTON_UNDO = "↩ Undo"
+UNDONE_HEADER = "↩ Undone."
 CONFIRM_FOOTER = "Only {name} or a maintainer can confirm."
 RUNNING = "⏳ Working on it…"
 CANCELLED = "Cancelled by {name}."
@@ -172,6 +174,8 @@ STALE_NOTE = "I was offline when you sent this. Check it is still what you want 
 CB_UNAVAILABLE = "That request isn't available any more."
 CB_ALREADY = "That request was already handled."
 CB_RUNNING = "Already on it."
+CB_UNDO_LATE = "Too late to undo that one."
+CB_UNDONE = "That was already undone."
 CB_EXPIRED = "That request expired. Ask me again."
 CB_NOT_ALLOWED = "Only {name} or a maintainer can confirm this."
 CB_NOT_ALLOWED_ANYONE = "Only a maintainer can confirm this."
@@ -179,6 +183,7 @@ CB_ANONYMOUS = "Anonymous admins can't confirm. Use your own account."
 CB_WRITE_LIMITED = "That's a lot of changes on GitHub in a short time. Try again in {wait}."
 CB_CANCELLED = "Cancelled."
 CB_STARTED = "On it."
+DONE_UNDO_LABELS = "Put the labels on {issue} back as they were."
 DONE_ASSIGNED = "Assigned {people} to {issue}."
 DONE_UNASSIGNED = "Removed {people} from {issue}."
 DONE_STATUS = '{issue} is now "{status}".'
@@ -197,6 +202,7 @@ STEP_CRASHED = "something unexpected went wrong. It may be partly done: check Gi
 STEP_NOT_LINKED = "that repo isn't linked to this chat any more."
 TOO_BIG = "That's too much to confirm in one message. Ask for fewer things at a time."
 STEP_BROKEN = "something about this request doesn't add up. Nothing else was run."
+NOT_RUN = "Something went wrong before I could do that, so nothing was changed. Try again."
 CRASHED = "Something went wrong while running that. It may be partly done: check GitHub."
 
 # Resolving what a message meant (D47)

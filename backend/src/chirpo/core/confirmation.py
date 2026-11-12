@@ -21,6 +21,7 @@ from chirpo.core.domain import AuditResult, Button, InboundCallback, RepoRef, Se
 from chirpo.core.dryrun import MAX_TEXT, describe
 from chirpo.core.errors import MessagingError
 from chirpo.core.executor import Outcome, execute
+from chirpo.core.executor import undo as undo_effects
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
 from chirpo.core.ports import MessagingAdapter
@@ -31,6 +32,7 @@ MAX_CARD = 4000  # Telegram refuses messages over 4096 characters
 SHORT_TEXT = 120
 CONFIRM = "ok"
 CANCEL = "no"
+UNDO = "undo"
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ async def propose(
         )
         await services.pending.attach_message(asker.workspace_id, pending.id, sent.message_id)
     except BaseException:
-        await asyncio.shield(_undo(services, replaces, pending))
+        await asyncio.shield(_give_back(services, replaces, pending))
         raise
     if replaces is not None:
         await _finish_replace(request, services, asker, replaces, pending)
@@ -109,7 +111,9 @@ async def _why_not(services: Services, row: PendingAction) -> str:
     return note_for(current.status)
 
 
-async def _undo(services: Services, old: PendingAction | None, new: PendingAction | None) -> None:
+async def _give_back(
+    services: Services, old: PendingAction | None, new: PendingAction | None
+) -> None:
     """The new card never reached the chat: nobody can use it, and the old one is theirs again.
     Best effort: whatever fails here must not hide the error that got us here."""
     now = services.now()
@@ -179,7 +183,7 @@ async def handle_callback(
     if workspace is None or row is None or not _is_its_card(row, event):
         await press.answer(messages.CB_UNAVAILABLE)
         return
-    if row.status != PendingStatus.PROPOSED:
+    if kind != UNDO and row.status != PendingStatus.PROPOSED:
         await press.answer(note_for(row.status))
         return
     members = await services.members.all(workspace.id)
@@ -194,7 +198,9 @@ async def handle_callback(
         return
     card = SentMessage(chat=event.chat, message_id=event.message_id)  # checked: it is the row's
     run = _Handling(press, services, row, asker, presser, card)
-    if row.is_expired(services.now()):
+    if kind == UNDO:
+        await run.undo()
+    elif row.is_expired(services.now()):
         await run.expire()
     elif kind == CANCEL:
         await run.cancel()
@@ -264,6 +270,7 @@ class _Handling:
                 requester=self.asker,
                 confirmer=self.presser,
                 services=self.services,
+                pending_id=self.row.id,
             )
             status = PendingStatus.FAILED if outcome.problem else PendingStatus.EXECUTED
             result = {"lines": outcome.done, "problem": outcome.problem}
@@ -271,7 +278,56 @@ class _Handling:
         except BaseException:  # also a cancelled job: a row must never stay "running"
             await asyncio.shield(self._crashed())
             raise
-        await self.press.show(self.card, _report(outcome, len(self.row.steps)), resend=True)
+        await self.press.show(self.card, report(outcome, len(self.row.steps)), resend=True)
+
+    async def undo(self) -> None:
+        """Reverses a change that ran without a card (D56): what it added comes off, what it
+        removed goes back, as the person who asked, within the same hour a card would last."""
+        row, services = self.row, self.services
+        effects = row.result.get("effects")
+        if not effects or row.status not in (PendingStatus.EXECUTED, PendingStatus.FAILED):
+            await self.press.answer(note_for(row.status) if effects else messages.CB_UNAVAILABLE)
+            return
+        if row.is_expired(services.now()):
+            await self.press.answer(messages.CB_UNDO_LATE)
+            return
+        if not await self._move(row.status, PendingStatus.UNDONE):  # one press wins
+            await self._lost()
+            return
+        await self.press.answer(messages.CB_STARTED)
+        try:
+            outcome = await undo_effects(
+                effects,
+                requester=self.asker,
+                confirmer=self.presser,
+                services=services,
+                pending_id=row.id,
+            )
+        except BaseException:
+            await asyncio.shield(self._reopen())
+            raise
+        if outcome.problem is not None:  # it can be tried again
+            await self._reopen()
+            text = messages.STOPPED.format(reason=outcome.problem)
+            with suppress(MessagingError):
+                await self.press.messaging.send_message(
+                    self.card.chat, text, reply_to=self.card.message_id
+                )
+            return
+        await self.press.show(
+            self.card, "\n".join([messages.UNDONE_HEADER, *outcome.done]), resend=True
+        )
+
+    async def _reopen(self) -> None:
+        """An undo that didn't happen: the change can be undone again."""
+        with suppress(Exception):
+            await self._move(PendingStatus.UNDONE, self.row.status)
+
+    async def _move(self, expect: PendingStatus, to: PendingStatus) -> bool:
+        moved = await self.services.pending.advance(
+            self.row.workspace_id, self.row.id, expect=expect, to=to, now=self.services.now()
+        )
+        return moved is not None
 
     async def _lost(self) -> None:
         """The move didn't happen: someone else got the row first, or it ran out of time between
@@ -331,13 +387,15 @@ def note_for(status: PendingStatus) -> str:
             return messages.CB_EXPIRED
         case PendingStatus.CONFIRMED | PendingStatus.EXECUTING:
             return messages.CB_RUNNING
+        case PendingStatus.UNDONE:
+            return messages.CB_UNDONE
         case _:
             return messages.CB_ALREADY
 
 
 def _parse(data: str) -> tuple[str, UUID] | None:
     kind, _, raw = data.partition(":")
-    if kind not in (CONFIRM, CANCEL):
+    if kind not in (CONFIRM, CANCEL, UNDO):
         return None
     try:
         return kind, UUID(raw)
@@ -350,7 +408,7 @@ def _is_its_card(row: PendingAction, event: InboundCallback) -> bool:
     return row.message_id == event.message_id and row.chat == event.chat
 
 
-def _report(outcome: Outcome, steps: int) -> str:
+def report(outcome: Outcome, steps: int) -> str:
     lines = list(outcome.done)
     if outcome.problem is not None:
         lines.append(messages.STOPPED.format(reason=outcome.problem))

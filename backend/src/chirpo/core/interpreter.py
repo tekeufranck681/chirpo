@@ -37,6 +37,7 @@ from chirpo.core.context import (
     default_of,
     proposal_size,
 )
+from chirpo.core.direct import run_now, runs_without_card
 from chirpo.core.domain import Attachment, AuditResult, IssueQuery, RecentMessage, RepoRef
 from chirpo.core.errors import (
     CodeHostError,
@@ -267,7 +268,13 @@ async def _answer_timed(
         await request.reply(messages.CARD_UNCHANGED)  # the card stays, to confirm or cancel
         return
     if changes:
-        if services.now() - request.message.sent_at > services.stale_after:
+        fresh = services.now() - request.message.sent_at <= services.stale_after
+        own, quoted = request.message.text, replied.text if replied else ""
+        if replacing is None and fresh and runs_without_card(changes, own, quoted):
+            await run_now(request, actor.member, services, changes, notes)
+            timer.lap("reply")
+            return
+        if not fresh:
             notes = [*notes, messages.STALE_NOTE]  # the worker was away: don't act on old words
         await propose(request, actor.member, services, changes, default, notes, replacing)
     timer.lap("reply")

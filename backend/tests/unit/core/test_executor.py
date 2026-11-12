@@ -31,7 +31,7 @@ from chirpo.core.domain import (
     RepoPermission,
     RepoRef,
 )
-from chirpo.core.executor import execute
+from chirpo.core.executor import Outcome, execute, undo
 from chirpo.core.pending import Step
 from chirpo.core.permissions import PermissionChecker, Role
 from chirpo.core.ratelimit import Limits, RateLimiter
@@ -97,6 +97,14 @@ class Setup:
             NewIssue(title="Checkout crashes", **fields),  # type: ignore[arg-type]
         )
         return created.number
+
+    async def outcome(self, *proposals: Proposal, confirmer: Member | None = None) -> Outcome:
+        return await execute(
+            [Step.of(p, REPO) for p in proposals],
+            requester=self.franck,
+            confirmer=confirmer,
+            services=self.services,
+        )
 
     async def run(self, *proposals: Proposal) -> "tuple[list[str], str | None]":
         outcome = await execute(
@@ -320,3 +328,167 @@ async def test_an_unexpected_error_keeps_the_earlier_steps_and_audits_the_failur
     assert len(done) == 1 and done[0].startswith("Created #")
     assert problem == messages.STEP_CRASHED
     assert [e.result for e in s.audit.entries] == [AuditResult.EXECUTED, AuditResult.FAILED]
+
+
+# ----------------------------------------------------- what label steps changed, and undoing it
+
+
+async def test_a_status_step_records_what_it_added_and_removed() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "status: todo"))
+    out = await s.outcome(SetStatus(repo=REPO_NAME, issue=on(number), status="status: review"))
+    assert out.effects == [
+        {
+            "provider": "github",
+            "repo": REPO_NAME,
+            "number": number,
+            "added": ["status: review"],
+            "removed": ["status: todo"],
+        }
+    ]
+
+
+async def test_only_labels_that_really_changed_are_recorded() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug",))
+    added = await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("BUG", "urgent")))
+    assert added.effects[0]["added"] == ["urgent"] and added.effects[0]["removed"] == []
+    removed = await s.outcome(
+        RemoveLabels(repo=REPO_NAME, issue=on(number), labels=("urgent", "missing"))
+    )
+    assert removed.effects[0]["removed"] == ["urgent"] and removed.effects[0]["added"] == []
+
+
+async def test_a_step_that_changes_nothing_records_nothing() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug",))
+    out = await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("bug",)))
+    assert out.effects == []
+
+
+async def test_a_run_nobody_confirmed_is_audited_without_a_confirmer() -> None:
+    s = await setup()
+    number = await s.issue()
+    await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("bug",)))
+    assert s.audit.entries[-1].confirmed_by_member_id is None
+
+
+async def test_effects_survive_a_later_step_that_fails() -> None:
+    s = await setup()
+    number = await s.issue()
+    out = await s.outcome(
+        AddLabels(repo=REPO_NAME, issue=on(number), labels=("bug",)),
+        CloseIssue(repo=REPO_NAME, issue=on(999)),
+    )
+    assert out.problem is not None and len(out.effects) == 1  # what ran can still be undone
+
+
+async def test_undoing_a_status_change_puts_the_old_status_back() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "status: todo"))
+    out = await s.outcome(SetStatus(repo=REPO_NAME, issue=on(number), status="status: review"))
+    result = await undo(out.effects, requester=s.franck, confirmer=s.annie, services=s.services)
+    assert result.problem is None
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "status: todo"}
+    assert result.done == [messages.DONE_UNDO_LABELS.format(issue=f'#{number} "Checkout crashes"')]
+
+
+async def test_undo_leaves_labels_somebody_else_changed_alone() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug",))
+    out = await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("urgent",)))
+    current = s.codehost.issues[(REPO.key, number)]
+    s.codehost.issues[(REPO.key, number)] = current.model_copy(
+        update={"labels": (*current.labels, "wontfix")}
+    )  # a person adds one on GitHub meanwhile
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "wontfix"}
+
+
+async def test_undoing_a_removal_puts_the_label_back_once() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "urgent"))
+    out = await s.outcome(RemoveLabels(repo=REPO_NAME, issue=on(number), labels=("urgent",)))
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert sorted(s.codehost.issues[(REPO.key, number)].labels) == ["bug", "urgent"]
+
+
+async def test_undo_is_checked_and_audited_like_any_change() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug",))
+    out = await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("urgent",)))
+    s.codehost.permissions[(REPO.key, "franck-gh")] = RepoPermission.READ
+    s.services = replace(s.services, permissions=PermissionChecker(s.codehost))
+    result = await undo(out.effects, requester=s.franck, confirmer=s.annie, services=s.services)
+    assert result.problem == messages.STEP_NO_LONGER_ALLOWED.format(name="Franck")
+    assert "urgent" in s.codehost.issues[(REPO.key, number)].labels  # nothing was touched
+    entry = s.audit.entries[-1]
+    assert (entry.action, entry.result) == ("undo_labels", AuditResult.DENIED)
+    assert entry.confirmed_by_member_id == s.annie.id
+
+
+async def test_undoing_on_an_issue_that_is_gone_says_so() -> None:
+    s = await setup()
+    number = await s.issue()
+    out = await s.outcome(AddLabels(repo=REPO_NAME, issue=on(number), labels=("bug",)))
+    del s.codehost.issues[(REPO.key, number)]
+    result = await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert result.problem == messages.STEP_NOT_FOUND
+
+
+async def test_undoing_several_changes_to_one_issue_goes_last_to_first() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "status: todo"))
+    out = await s.outcome(
+        SetStatus(repo=REPO_NAME, issue=on(number), status="status: in progress"),
+        SetStatus(repo=REPO_NAME, issue=on(number), status="status: review"),
+    )
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "status: todo"}
+
+
+async def test_undoing_an_add_followed_by_a_remove_of_the_same_label() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug",))
+    out = await s.outcome(
+        AddLabels(repo=REPO_NAME, issue=on(number), labels=("urgent",)),
+        RemoveLabels(repo=REPO_NAME, issue=on(number), labels=("urgent",)),
+    )
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug"}  # as it started
+
+
+async def test_undo_does_not_bring_back_a_status_somebody_replaced_since() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "status: todo"))
+    out = await s.outcome(SetStatus(repo=REPO_NAME, issue=on(number), status="status: review"))
+    current = s.codehost.issues[(REPO.key, number)]
+    s.codehost.issues[(REPO.key, number)] = current.model_copy(
+        update={"labels": ("bug", "status: done")}  # a person moved it on GitHub meanwhile
+    )
+    await undo(out.effects, requester=s.franck, confirmer=s.franck, services=s.services)
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "status: done"}
+
+
+async def test_audit_entries_say_which_stored_proposal_they_belong_to() -> None:
+    from uuid import uuid4
+
+    s = await setup()
+    number = await s.issue()
+    pending_id = uuid4()
+    out = await execute(
+        [Step.of(AddLabels(repo=REPO_NAME, issue=on(number), labels=("bug",)), REPO)],
+        requester=s.franck,
+        confirmer=None,
+        services=s.services,
+        pending_id=pending_id,
+    )
+    await undo(
+        out.effects,
+        requester=s.franck,
+        confirmer=s.franck,
+        services=s.services,
+        pending_id=pending_id,
+    )
+    assert [e.payload["pending_id"] for e in s.audit.entries[-2:]] == [str(pending_id)] * 2
