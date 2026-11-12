@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     # A message older than this when it is handled gets "I was offline" on its card (D54).
     stale_after_minutes: int = Field(default=5, ge=1, le=60 * 24)
 
+    # Prometheus numbers (D57): the API serves /metrics; the worker serves its own on this port.
+    metrics_enabled: bool = True
+    metrics_host: str = "127.0.0.1"  # Compose sets 0.0.0.0 so Prometheus can reach the worker
+    metrics_port: int = Field(default=9100, ge=1, le=65535)
+
     @field_validator("database_url")
     @classmethod
     def _async_postgres_driver(cls, value: str) -> str:

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
@@ -29,6 +30,7 @@ from chirpo.db.repositories import (
 )
 from chirpo.db.session import create_engine, create_session_factory
 from chirpo.logging import bound_context, configure_logging, get_logger, init_sentry
+from chirpo.metrics import counted_job, serve
 from chirpo.security import Encryptor
 from chirpo.workers.queue import ArqLoginJobs, open_pending_login
 
@@ -37,12 +39,14 @@ log = get_logger(__name__)
 PROCESSED_EVENTS_RETENTION_DAYS = 7
 
 
+@counted_job
 async def noop(ctx: dict[str, Any]) -> str:
     with bound_context(job_id=ctx.get("job_id")):
         log.info("noop_job_ran")
     return "ok"
 
 
+@counted_job
 async def handle_update(ctx: dict[str, Any], platform: str, raw: dict[str, Any]) -> None:
     messaging: MessagingAdapter | None = ctx["messaging"].get(platform)
     with bound_context(job_id=ctx.get("job_id"), platform=platform):
@@ -57,6 +61,7 @@ async def handle_update(ctx: dict[str, Any], platform: str, raw: dict[str, Any])
             log.info("update_handled" if handled else "duplicate_update_skipped")
 
 
+@counted_job
 async def check_device_login(ctx: dict[str, Any], sealed: str) -> None:
     services: Services | None = ctx.get("services")
     identity = services.identity if services else None
@@ -71,12 +76,14 @@ async def check_device_login(ctx: dict[str, Any], sealed: str) -> None:
         await identity.check(pending, messaging)
 
 
+@counted_job
 async def prune_processed_events(ctx: dict[str, Any]) -> int:
     deleted: int = await ctx["processed"].prune(older_than_days=PROCESSED_EVENTS_RETENTION_DAYS)
     log.info("processed_events_pruned", deleted=deleted)
     return deleted
 
 
+@counted_job
 async def prune_message_buffer(ctx: dict[str, Any]) -> int:
     buffer = ctx.get("buffer")
     if buffer is None:
@@ -86,6 +93,7 @@ async def prune_message_buffer(ctx: dict[str, Any]) -> int:
     return deleted
 
 
+@counted_job
 async def expire_pending(ctx: dict[str, Any]) -> int:
     """Expires old cards, fails cut-off runs and deletes old finished rows (M5.4)."""
     services = ctx.get("services")
@@ -99,6 +107,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings)
     init_sentry(settings)
+    if settings.metrics_enabled:
+        ctx["metrics_server"] = serve(settings.metrics_host, settings.metrics_port)
+        if ctx["metrics_server"] is None:
+            log.warning("metrics_port_unavailable", port=settings.metrics_port)
     ctx["messaging"] = await connect_messaging(settings)
     ctx["engine"] = create_engine(settings)
     ctx["processed"] = SqlProcessedEvents(create_session_factory(ctx["engine"]))
@@ -183,6 +195,10 @@ async def _app_install_url(auth: GitHubAuth) -> str | None:
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    server = ctx.get("metrics_server")
+    if server is not None:  # first, so a failure below can't leave its thread running
+        await asyncio.to_thread(server.shutdown)  # blocks up to its poll interval
+        server.server_close()
     for adapter in ctx.get("messaging", {}).values():
         await adapter.aclose()
     if "device_login" in ctx:

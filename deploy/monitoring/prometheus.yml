@@ -1,0 +1,15 @@
+# Prometheus for the optional `monitoring` Compose profile (D57). Targets are reachable only inside
+# the Compose network: the API's /metrics is not forwarded by Caddy, and the worker's port is not published.
+# The ports are container-internal and fixed in docker-compose.dev.yml (api: 8000, worker:
+# CHIRPO_METRICS_PORT); a test checks they agree.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+  - job_name: worker
+    static_configs:
+      - targets: ["worker:9100"]

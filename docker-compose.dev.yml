@@ -15,6 +15,10 @@ x-backend: &backend
     CHIRPO_TRUSTED_PROXIES: "*"
     # The host path in .env doesn't exist inside the container; the key is mounted here instead.
     CHIRPO_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/chirpo/github-app.pem
+    # The worker's metrics port is not published; only Prometheus on this network can reach it (D57).
+    CHIRPO_METRICS_HOST: 0.0.0.0
+    # Fixed here (this beats .env) so it always matches deploy/monitoring/prometheus.yml.
+    CHIRPO_METRICS_PORT: 9100
   volumes:
     - ./backend/src:/app/src
     - ./backend/alembic:/app/alembic
@@ -117,7 +121,48 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Optional: docker compose --profile monitoring up -d  (D57)
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v3.8.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:12.3.1
+    # No default login: it refuses to start until GRAFANA_PASSWORD is set in .env.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ "$${#GF_SECURITY_ADMIN_PASSWORD}" -ge 12 ] || { echo "Set GRAFANA_PASSWORD in .env first (12 characters or more)"; exit 1; }; exec /run.sh'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
+    volumes:
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: "no"
+
 volumes:
   db-data:
   redis-data:
   caddy-data:
+  prometheus-data:
+  grafana-data:

@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.115",
     "githubkit[auth-app]>=0.16.1",
     "httpx>=0.28",
+    "prometheus-client>=0.26.0",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
     "python-telegram-bot>=22",
