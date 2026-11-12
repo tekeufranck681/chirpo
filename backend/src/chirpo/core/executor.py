@@ -8,9 +8,10 @@ Text written by the model is cleaned before it is posted (core/outbound.py).
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
 from chirpo.core import messages
 from chirpo.core.actions import (
@@ -43,6 +44,7 @@ from chirpo.core.domain import (
 from chirpo.core.errors import CodeHostError, CodeHostNotFoundError
 from chirpo.core.outbound import neutralise
 from chirpo.core.pending import Step
+from chirpo.core.permissions import Action
 from chirpo.core.resolution import STATUS_LABELS
 from chirpo.core.workspaces import AuditEntry, Member
 
@@ -63,6 +65,8 @@ class Outcome:
     done: list[str]  # one result text per thing that ran
     problem: str | None = None  # why it stopped, when it did
     stopped_at: int | None = None  # index of the step that stopped it
+    # What label steps changed (labels added and removed), so a person can undo them.
+    effects: list[dict[str, Any]] = field(default_factory=list)
 
 
 class _Stop(Exception):
@@ -81,51 +85,126 @@ class _Run:
 
     lines: list[str] = field(default_factory=list)
     detail: dict[str, Any] = field(default_factory=dict)
+    effects: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def execute(
-    steps: Sequence[Step], *, requester: Member, confirmer: Member, services: Services
+    steps: Sequence[Step],
+    *,
+    requester: Member,
+    confirmer: Member | None,
+    services: Services,
+    pending_id: UUID | None = None,
 ) -> Outcome:
+    """Runs the steps in order for `requester`. `confirmer` is who pressed Confirm, or None when
+    nobody had to (status and label changes the sender named, D56)."""
     done: list[str] = []
+    effects: list[dict[str, Any]] = []
     for index, step in enumerate(steps):
         run = _Run()
-        result, error, reason = AuditResult.EXECUTED, None, None
-        payload: dict[str, Any] = {}
-        try:
+        payload: dict[str, Any] = _of(pending_id)
+
+        async def work(
+            step: Step = step, run: _Run = run, payload: dict[str, Any] = payload
+        ) -> None:
             repo, proposal = _load(step)
-            payload = {"repo": repo.full_name}
+            payload["repo"] = repo.full_name
             await _guard(proposal, repo, requester, services)
             await _run(proposal, repo, requester, services, run)
-        except _Stop as stop:
-            result, error, reason = stop.result, stop.code, stop.reason
-        except CodeHostNotFoundError as exc:
-            result, error, reason = AuditResult.FAILED, type(exc).__name__, messages.STEP_NOT_FOUND
-        except CodeHostError as exc:
-            result, error = AuditResult.FAILED, type(exc).__name__
-            reason = messages.STEP_REFUSED.format(reason=error)
-        except Exception as exc:
-            # Whatever else: what ran before (and this step's own audit) must not be lost, or the
-            # person asks again and gets a duplicate. Cancellation is not an Exception: it passes.
-            log.warning(
-                "step_crashed action=%s error=%s", step.action, type(exc).__name__, exc_info=True
-            )
-            result, error, reason = AuditResult.FAILED, type(exc).__name__, messages.STEP_CRASHED
+
+        result, error, reason = await _attempt(step.action, work)
         done += run.lines
-        await services.audit.record(
-            AuditEntry(
-                workspace_id=requester.workspace_id,
-                actor_member_id=requester.id,
-                confirmed_by_member_id=confirmer.id,
-                action=step.action,
-                result=result,
-                payload={**payload, **run.detail},
-                error=error,
-            )
+        effects += run.effects
+        await _audit(
+            services, requester, confirmer, step.action, result, {**payload, **run.detail}, error
         )
         if reason is not None:
             log.info("step_stopped action=%s result=%s", step.action, result)
+            return Outcome(done, reason, index, effects)
+    return Outcome(done, effects=effects)
+
+
+async def undo(
+    effects: Sequence[Mapping[str, Any]],
+    *,
+    requester: Member,
+    confirmer: Member,
+    services: Services,
+    pending_id: UUID | None = None,
+) -> Outcome:
+    """Reverses recorded label changes on the issues' current labels: what was added comes off,
+    what was removed goes back, and anything else somebody changed since stays. As the asker."""
+    done: list[str] = []
+    # Last change first: each one is undone on top of the ones that came after it.
+    for index, effect in enumerate(reversed(effects)):
+        payload = {**_of(pending_id), "repo": effect["repo"], "number": effect["number"]}
+
+        async def work(effect: Mapping[str, Any] = effect) -> None:
+            repo = RepoRef.parse(effect["provider"], effect["repo"])
+            await _check(Action.TRIAGE_ISSUE, repo, requester, services)
+            issue = await services.codehost.get_issue(repo, effect["number"])
+            current = _without(issue.labels, effect["added"])
+            restore = effect["removed"]
+            if any(label.startswith(STATUS_PREFIX) for label in current):
+                # Somebody set another status since: putting the old one back would leave two.
+                restore = [label for label in restore if not label.startswith(STATUS_PREFIX)]
+            labels = _union(current, restore)
+            await services.codehost.update_issue(repo, issue.number, IssuePatch(labels=labels))
+            done.append(messages.DONE_UNDO_LABELS.format(issue=_ref(issue)))
+
+        result, error, reason = await _attempt("undo_labels", work)
+        await _audit(services, requester, confirmer, "undo_labels", result, payload, error)
+        if reason is not None:
             return Outcome(done, reason, index)
     return Outcome(done)
+
+
+async def _attempt(
+    action: str, work: Callable[[], Awaitable[None]]
+) -> tuple[AuditResult, str | None, str | None]:
+    """Runs `work` and says how it ended: (audit result, error code, what to tell people)."""
+    try:
+        await work()
+    except _Stop as stop:
+        return stop.result, stop.code, stop.reason
+    except CodeHostNotFoundError as exc:
+        return AuditResult.FAILED, type(exc).__name__, messages.STEP_NOT_FOUND
+    except CodeHostError as exc:
+        error = type(exc).__name__
+        return AuditResult.FAILED, error, messages.STEP_REFUSED.format(reason=error)
+    except Exception as exc:
+        # Whatever else: what ran before (and this step's own audit) must not be lost, or the
+        # person asks again and gets a duplicate. Cancellation is not an Exception: it passes.
+        log.warning("step_crashed action=%s error=%s", action, type(exc).__name__, exc_info=True)
+        return AuditResult.FAILED, type(exc).__name__, messages.STEP_CRASHED
+    return AuditResult.EXECUTED, None, None
+
+
+async def _audit(
+    services: Services,
+    requester: Member,
+    confirmer: Member | None,
+    action: str,
+    result: AuditResult,
+    payload: dict[str, Any],
+    error: str | None,
+) -> None:
+    await services.audit.record(
+        AuditEntry(
+            workspace_id=requester.workspace_id,
+            actor_member_id=requester.id,
+            confirmed_by_member_id=confirmer.id if confirmer else None,
+            action=action,
+            result=result,
+            payload=payload,
+            error=error,
+        )
+    )
+
+
+def _of(pending_id: UUID | None) -> dict[str, Any]:
+    """Which stored proposal an audit entry belongs to, when there is one."""
+    return {"pending_id": str(pending_id)} if pending_id else {}
 
 
 def _load(step: Step) -> tuple[RepoRef, Proposal]:
@@ -136,10 +215,14 @@ def _load(step: Step) -> tuple[RepoRef, Proposal]:
 
 
 async def _guard(proposal: Proposal, repo: RepoRef, requester: Member, services: Services) -> None:
-    """The asker's permission and write allowance, as of now."""
     action = permission_of(proposal)
     if action is None:
         raise _Stop(messages.STEP_BROKEN, code="invalid_step")
+    await _check(action, repo, requester, services)
+
+
+async def _check(action: Action, repo: RepoRef, requester: Member, services: Services) -> None:
+    """The asker's permission, the repo still being linked, and a write allowance, as of now."""
     try:
         verdict = await services.permissions.check(requester, action, repo)
     except CodeHostError:
@@ -199,13 +282,15 @@ async def _run(
             )
         case SetStatus():
             issue = await _issue(proposal, repo, services)
-            await _set_status(proposal.status, issue, repo, services)
+            after = await _set_status(proposal.status, issue, repo, services)
+            _record(run, repo, issue, after)
             status = proposal.status.removeprefix(STATUS_PREFIX)
             run.lines.append(messages.DONE_STATUS.format(issue=_ref(issue), status=status))
         case AddLabels():
             issue = await _issue(proposal, repo, services)
             labels = _union(issue.labels, proposal.labels)
             await host.update_issue(repo, issue.number, IssuePatch(labels=labels))
+            _record(run, repo, issue, labels)
             run.lines.append(
                 messages.DONE_ADDED_LABELS.format(
                     labels=", ".join(proposal.labels), issue=_ref(issue)
@@ -219,6 +304,7 @@ async def _run(
                 if not any(same_login(label, r) for r in proposal.labels)
             )
             await host.update_issue(repo, issue.number, IssuePatch(labels=kept))
+            _record(run, repo, issue, kept)
             run.lines.append(
                 messages.DONE_REMOVED_LABELS.format(
                     labels=", ".join(proposal.labels), issue=_ref(issue)
@@ -260,14 +346,43 @@ async def _issue(proposal: Any, repo: RepoRef, services: Services) -> Issue:
     return await services.codehost.get_issue(repo, number)
 
 
-async def _set_status(status: str, issue: Issue, repo: RepoRef, services: Services) -> None:
+async def _set_status(
+    status: str, issue: Issue, repo: RepoRef, services: Services
+) -> tuple[str, ...]:
+    """Makes `status` the issue's only status label; returns the labels it now has."""
     if status not in STATUS_LABELS.values():
         raise _Stop(messages.STEP_BROKEN, code="invalid_step")
     await services.codehost.ensure_labels(
         repo, [LabelSpec(name=status, color=STATUS_COLORS[status])]
     )
     others = tuple(label for label in issue.labels if not label.startswith(STATUS_PREFIX))
-    await services.codehost.update_issue(repo, issue.number, IssuePatch(labels=(*others, status)))
+    labels = (*others, status)
+    await services.codehost.update_issue(repo, issue.number, IssuePatch(labels=labels))
+    return labels
+
+
+def _record(run: _Run, repo: RepoRef, issue: Issue, after: Sequence[str]) -> None:
+    """What this step did to the labels, for Undo; nothing if it changed nothing."""
+    added = [label for label in after if not _has(issue.labels, label)]
+    removed = [label for label in issue.labels if not _has(after, label)]
+    if added or removed:
+        run.effects.append(
+            {
+                "provider": repo.provider,
+                "repo": repo.full_name,
+                "number": issue.number,
+                "added": added,
+                "removed": removed,
+            }
+        )
+
+
+def _has(labels: Sequence[str], label: str) -> bool:
+    return any(same_login(label, other) for other in labels)
+
+
+def _without(current: Sequence[str], gone: Sequence[str]) -> tuple[str, ...]:
+    return tuple(label for label in current if not _has(gone, label))
 
 
 def _with_footer(body: str, login: str) -> str:

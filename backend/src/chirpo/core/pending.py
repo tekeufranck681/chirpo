@@ -24,6 +24,7 @@ class PendingStatus(StrEnum):
     REJECTED = "rejected"
     MODIFIED = "modified"
     EXPIRED = "expired"
+    UNDONE = "undone"  # a change that ran without a card, then reversed by its Undo button
 
 
 # Nothing happens to a proposal in these states any more.
@@ -34,6 +35,7 @@ FINISHED = frozenset(
         PendingStatus.REJECTED,
         PendingStatus.MODIFIED,
         PendingStatus.EXPIRED,
+        PendingStatus.UNDONE,
     }
 )
 # Between pressing Confirm and the result: a row that stays here was cut off (worker killed).

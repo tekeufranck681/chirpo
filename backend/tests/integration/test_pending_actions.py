@@ -255,6 +255,47 @@ async def test_the_sweep_deletes_only_old_finished_rows(stores: Stores) -> None:
     assert await stores.pending.get(ws3.id, running.id) is not None  # not finished
 
 
+async def test_a_finished_change_can_be_undone_once_and_the_effects_are_kept(
+    stores: Stores,
+) -> None:
+    row, workspace, _ = await propose(stores)
+    effects = [{"repo": REPO.full_name, "number": 7, "added": ["urgent"], "removed": []}]
+    await move(stores, row, workspace, PendingStatus.CONFIRMED, PendingStatus.EXECUTING)
+    done = await stores.pending.advance(
+        workspace.id,
+        row.id,
+        expect=PendingStatus.EXECUTING,
+        to=PendingStatus.EXECUTED,
+        now=NOW,
+        result={"lines": ["Added urgent to #7."], "effects": effects},
+    )
+    assert done is not None and done.result["effects"] == effects
+    first = await stores.pending.advance(
+        workspace.id, row.id, expect=PendingStatus.EXECUTED, to=PendingStatus.UNDONE, now=NOW
+    )
+    second = await stores.pending.advance(
+        workspace.id, row.id, expect=PendingStatus.EXECUTED, to=PendingStatus.UNDONE, now=NOW
+    )
+    assert first is not None and first.status == PendingStatus.UNDONE
+    assert second is None  # one undo, even if pressed twice
+    assert first.result["effects"] == effects
+
+
+async def test_undone_rows_are_deleted_like_other_finished_ones(stores: Stores) -> None:
+    row, workspace, _ = await propose(stores)
+    await move(
+        stores,
+        row,
+        workspace,
+        PendingStatus.CONFIRMED,
+        PendingStatus.EXECUTING,
+        PendingStatus.EXECUTED,
+        PendingStatus.UNDONE,
+    )
+    assert await stores.pending.purge(FAR_AHEAD) >= 1
+    assert await stores.pending.get(workspace.id, row.id) is None
+
+
 async def test_a_proposal_for_someone_outside_the_workspace_is_refused(stores: Stores) -> None:
     if not stores.is_postgres:
         pytest.skip("a database guarantee")

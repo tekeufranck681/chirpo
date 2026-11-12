@@ -75,6 +75,7 @@ class Resolved:
     issue: Issue | None = None  # the issue acted on, to show its title
     login: str | None = None  # the sender's, for "my issues"
     notes: tuple[str, ...] = ()  # what was left out, e.g. labels the repo doesn't have
+    ref: IssueRef | None = None  # how the model named the issue, before it became a number
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +136,9 @@ class _Resolver:
         repo = await self._repo(proposal.repo)
         update: dict[str, object] = {"repo": repo.full_name}
         notes: list[str] = []
-        issue = None
+        issue, ref = None, None
         if isinstance(proposal, OnIssue):
+            ref = proposal.issue
             issue = await self._issue(
                 repo, proposal.issue, closed=isinstance(proposal, ReopenIssue)
             )
@@ -168,6 +170,7 @@ class _Resolver:
             issue=issue,
             login=login,
             notes=tuple(notes),
+            ref=ref,
         )
 
     async def _repo(self, name: str | None) -> RepoRef:
@@ -330,6 +333,11 @@ def _status_label(said: str) -> str:
 
 def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[\w']+", text.casefold()) if w not in _IGNORED_WORDS}
+
+
+def significant_words(text: str) -> set[str]:
+    """The words of `text` that say something (no "the", "issue", "bug"...), lower-cased."""
+    return _words(text)
 
 
 def _quoted(names: Sequence[str]) -> str:
