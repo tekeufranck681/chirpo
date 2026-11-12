@@ -1,5 +1,10 @@
 # Development: plain HTTP. Production (M10) uses {$CHIRPO_DOMAIN} for automatic HTTPS.
 :80 {
+	# Metrics are for Prometheus inside the Docker network only (D57). Denied by name so a future
+	# catch-all proxy rule can't expose them.
+	@metrics path /metrics*
+	respond @metrics 404
+
 	handle /api/* {
 		reverse_proxy api:8000
 	}

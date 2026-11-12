@@ -3,6 +3,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from arq import create_pool
 from arq.connections import RedisSettings
+from arq.constants import default_queue_name
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
@@ -10,6 +11,8 @@ from chirpo import __version__
 from chirpo.adapters.messaging.connect import connect_messaging
 from chirpo.api.health import database_check, redis_check
 from chirpo.api.health import router as health_router
+from chirpo.api.metrics import RequestMetrics
+from chirpo.api.metrics import router as metrics_router
 from chirpo.api.webhooks import TelegramIntake
 from chirpo.api.webhooks import router as webhooks_router
 from chirpo.config import Settings, get_settings
@@ -33,6 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             redis = Redis.from_url(settings.redis_url)
             cleanup.push_async_callback(redis.aclose)
             app.state.checks = {"database": database_check(engine), "redis": redis_check(redis)}
+
+            async def queue_length() -> int:
+                return int(await redis.zcard(default_queue_name))
+
+            app.state.queue_length = queue_length
             await _start_telegram_webhook(app, settings, cleanup)
             yield
 
@@ -47,6 +55,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(health_router, prefix="/api")
     app.include_router(webhooks_router)
+    if settings.metrics_enabled:
+        app.include_router(metrics_router)
+        app.add_middleware(RequestMetrics)
     return app
 
 

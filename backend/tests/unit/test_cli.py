@@ -164,11 +164,12 @@ def test_llm_try_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_llm_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     from chirpo.adapters.llm import llm_from_settings
-    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, DEFAULT_THINKING, GeminiProvider
+    from chirpo.adapters.llm.gemini import DEFAULT_MODEL, DEFAULT_THINKING
+    from chirpo.adapters.llm.metered import MeteredLLM
 
     assert llm_from_settings(_unconfigured(monkeypatch)) is None  # type: ignore[arg-type]
     provider = llm_from_settings(_unconfigured(monkeypatch, llm_api_key="k"))  # type: ignore[arg-type]
-    assert isinstance(provider, GeminiProvider)
+    assert isinstance(provider, MeteredLLM)  # counts calls and tokens (D57)
     assert provider.model == DEFAULT_MODEL
     assert provider.thinking == DEFAULT_THINKING
     chosen = llm_from_settings(
@@ -177,7 +178,7 @@ def test_llm_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     assert chosen is not None
     assert chosen.model == "gemini-3.5-flash-lite"
     thinking = llm_from_settings(_unconfigured(monkeypatch, llm_api_key="k", llm_thinking="low"))  # type: ignore[arg-type]
-    assert isinstance(thinking, GeminiProvider)
+    assert isinstance(thinking, MeteredLLM)
     assert thinking.thinking == "low"
 
 

@@ -20,4 +20,6 @@ def llm_from_settings(
 
     model = settings.llm_model or DEFAULT_MODEL
     thinking = settings.llm_thinking or DEFAULT_THINKING
-    return GeminiProvider(key, model, client=client, thinking=thinking)
+    from chirpo.adapters.llm.metered import MeteredLLM
+
+    return MeteredLLM(GeminiProvider(key, model, client=client, thinking=thinking), "gemini")
