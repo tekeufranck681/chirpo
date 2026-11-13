@@ -30,7 +30,7 @@ from chirpo.core.actions import (
     permission_of,
 )
 from chirpo.core.commands.base import Services
-from chirpo.core.context import MAX_NAME, clean
+from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import (
     AuditResult,
     Issue,
@@ -42,7 +42,7 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import CodeHostError, CodeHostNotFoundError
-from chirpo.core.outbound import neutralise
+from chirpo.core.outbound import neutralise, shown
 from chirpo.core.pending import Step
 from chirpo.core.permissions import Action
 from chirpo.core.resolution import STATUS_LABELS
@@ -233,7 +233,7 @@ async def _check(action: Action, repo: RepoRef, requester: Member, services: Ser
     ):
         raise _Stop(messages.STEP_NOT_LINKED, code="not_linked", result=AuditResult.DENIED)
     if not verdict.allowed:
-        name = clean(requester.display_name, MAX_NAME)
+        name = shown(requester.display_name, MAX_NAME)
         text = messages.STEP_NO_LONGER_ALLOWED.format(name=name)
         raise _Stop(text, code="not_allowed", result=AuditResult.DENIED)
     if services.limits is not None:
@@ -293,7 +293,7 @@ async def _run(
             _record(run, repo, issue, labels)
             run.lines.append(
                 messages.DONE_ADDED_LABELS.format(
-                    labels=", ".join(proposal.labels), issue=_ref(issue)
+                    labels=_labels(proposal.labels), issue=_ref(issue)
                 )
             )
         case RemoveLabels():
@@ -307,7 +307,7 @@ async def _run(
             _record(run, repo, issue, kept)
             run.lines.append(
                 messages.DONE_REMOVED_LABELS.format(
-                    labels=", ".join(proposal.labels), issue=_ref(issue)
+                    labels=_labels(proposal.labels), issue=_ref(issue)
                 )
             )
         case CommentOnIssue():
@@ -397,8 +397,14 @@ def _union(current: Sequence[str], added: Sequence[str]) -> tuple[str, ...]:
 
 
 def _ref(issue: Issue) -> str:
-    return messages.DRY_ISSUE.format(number=issue.number, title=clean(issue.title, MAX_NAME))
+    return messages.DRY_ISSUE.format(number=issue.number, title=shown(issue.title, MAX_NAME))
 
 
 def _created(issue: Issue) -> str:
-    return messages.ISSUE_CREATED.format(number=issue.number, title=issue.title, url=issue.url)
+    title = shown(issue.title, MAX_TITLE)
+    return messages.ISSUE_CREATED.format(number=issue.number, title=title, url=issue.url)
+
+
+def _labels(names: Sequence[str]) -> str:
+    """Label names are outside text (anyone with write access names them): shown, not posted raw."""
+    return ", ".join(shown(name, MAX_NAME) for name in names)

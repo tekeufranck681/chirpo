@@ -247,3 +247,16 @@ def test_an_unknown_stored_personality_reads_as_light() -> None:
         assert _to_workspace(row).personality == "light"  # type: ignore[arg-type]
     row = SimpleNamespace(id=uuid4(), name="Shop", settings={"personality": "off"})
     assert _to_workspace(row).personality == "off"  # type: ignore[arg-type]
+
+
+async def test_issue_titles_offered_in_a_question_cannot_mention_anyone() -> None:
+    from chirpo.core.actions import IssueRef
+    from chirpo.core.domain import NewIssue
+
+    world = World([SetStatus(issue=IssueRef(description="checkout"), status="done")])
+    await world.linked()
+    for title in ("Checkout @everyone broke", "Checkout total wrong @annie_n"):
+        await world.codehost.create_issue(SANDBOX, NewIssue(title=title))
+    text = await world.say("the checkout one is done")
+    assert "@everyone" not in text and "@annie_n" not in text
+    assert f"@{ZWSP}everyone" in text

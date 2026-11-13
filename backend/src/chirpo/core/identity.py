@@ -14,8 +14,10 @@ from uuid import UUID, uuid4
 from pydantic import AwareDatetime, BaseModel, ConfigDict, SecretStr
 
 from chirpo.core import messages
+from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import AuditResult, ChatRef, InboundMessage
 from chirpo.core.errors import CodeHostError, MessagingForbiddenError
+from chirpo.core.outbound import shown
 from chirpo.core.ports import AuditLog, Members, MessagingAdapter, Workspaces
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount
 
@@ -165,7 +167,7 @@ class IdentityLinking:
         await self._jobs.hold(key, device.expires_in_seconds)
         private = messaging.private_chat(message.sender)
         text = messages.IAM_CODE.format(
-            name=message.sender.display_name,
+            name=shown(message.sender.display_name, MAX_NAME),
             url=device.verification_url,
             code=device.user_code,
             minutes=max(1, math.ceil(device.expires_in_seconds / 60)),

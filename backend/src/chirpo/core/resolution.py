@@ -34,6 +34,7 @@ from chirpo.core.actions import (
 from chirpo.core.context import MAX_NAME, Team, clean
 from chirpo.core.domain import Issue, IssueQuery, IssueState, Milestone, RepoRef
 from chirpo.core.errors import CodeHostNotFoundError
+from chirpo.core.outbound import shown
 from chirpo.core.ports import CodeHostAdapter
 from chirpo.core.workspaces import Member
 
@@ -125,7 +126,7 @@ async def resolve(
     """
     for proposal in proposals:
         if isinstance(proposal, AskClarifyingQuestion):
-            return Question(clean(proposal.question, MAX_QUESTION))
+            return Question(shown(proposal.question, MAX_QUESTION))
     resolver = _Resolver(team, sender, codehost, can_read)
     try:
         return [
@@ -209,11 +210,11 @@ class _Resolver:
             raise _Unclear(
                 _short(
                     messages.MILESTONE_DUPLICATE.format(
-                        count=len(same), name=clean(wanted, MAX_NAME), repo=repo.full_name
+                        count=len(same), name=shown(wanted, MAX_NAME), repo=repo.full_name
                     )
                 )
             )
-        names = ", ".join(clean(m.title, MAX_NAME) for m in found[:MAX_MILESTONES_NAMED])
+        names = ", ".join(shown(m.title, MAX_NAME) for m in found[:MAX_MILESTONES_NAMED])
         if name in CURRENT_MILESTONE:
             dated = [m for m in found if m.due_on is not None]
             if dated:
@@ -224,7 +225,7 @@ class _Resolver:
         raise _Unclear(
             _short(
                 messages.MILESTONE_UNKNOWN.format(
-                    name=clean(wanted, MAX_NAME), repo=repo.full_name, names=names
+                    name=shown(wanted, MAX_NAME), repo=repo.full_name, names=names
                 )
             )
         )
@@ -276,7 +277,7 @@ class _Resolver:
             raise _Unclear(text.format(description=description))
         if len(matches) > 1:
             options = ", ".join(
-                f'#{i.number} "{clean(i.title, MAX_TITLE)}"' for i in matches[:MAX_OPTIONS]
+                f'#{i.number} "{shown(i.title, MAX_TITLE)}"' for i in matches[:MAX_OPTIONS]
             )
             raise _Unclear(
                 messages.ISSUE_AMBIGUOUS.format(description=description, options=options)
@@ -296,7 +297,7 @@ class _Resolver:
                 messages.NO_SUCH_LABELS.format(
                     labels=_quoted(dropped),
                     repo=repo.full_name,
-                    existing=", ".join(await self._repo_labels(repo)),
+                    existing=", ".join(shown(n, MAX_NAME) for n in await self._repo_labels(repo)),
                 )
             )
         return labels
@@ -307,7 +308,7 @@ class _Resolver:
     def _login(self, name: str) -> str:
         member = self._member(name)
         if member.codehost is None:
-            name = clean(member.display_name, MAX_NAME)
+            name = shown(member.display_name, MAX_NAME)
             raise _Unclear(messages.PERSON_NOT_LINKED.format(name=name))
         return member.codehost.login
 
@@ -363,7 +364,7 @@ def _revalidated[P: Proposal](proposal: P, update: dict[str, object]) -> P:
 
 
 def _person(member: Member) -> str:
-    name = clean(member.display_name, MAX_NAME)
+    name = shown(member.display_name, MAX_NAME)
     return f"{name} (GitHub {member.codehost.login})" if member.codehost else name
 
 
@@ -397,7 +398,7 @@ def significant_words(text: str) -> set[str]:
 
 
 def _quoted(names: Sequence[str]) -> str:
-    return ", ".join(f'"{name}"' for name in names)
+    return ", ".join(f'"{shown(name, MAX_NAME)}"' for name in names)
 
 
 def _normal(text: str) -> str:
@@ -405,4 +406,4 @@ def _normal(text: str) -> str:
 
 
 def _short(question: str) -> str:
-    return clean(question, MAX_QUESTION)
+    return shown(question, MAX_QUESTION)

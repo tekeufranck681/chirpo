@@ -159,3 +159,31 @@ async def test_the_milestone_questions_stay_short() -> None:
     world = await team(*long_ones)
     world.llm.answers = [[ListIssues(milestone="nope")]]
     assert len(await world.say("what's left in nope?")) <= 500
+
+
+async def test_titles_from_github_cannot_mention_anyone_in_chat() -> None:
+    from chirpo.core.outbound import ZWSP
+
+    sneaky = Milestone(number=8, title="@everyone sprint", due_on=date(2026, 12, 4))
+    world = await team(sneaky, in_milestone={1: 8})
+    key = (SANDBOX.key, 1)
+    world.codehost.issues[key] = world.codehost.issues[key].model_copy(
+        update={"title": "Ping @annie_n and tap /unlink"}
+    )
+    text = await world.say("what's open this sprint?")
+    assert f"@{ZWSP}everyone" in text and f"@{ZWSP}annie_n" in text and f"/{ZWSP}unlink" in text
+    assert "@everyone" not in text and "@annie_n" not in text
+
+
+async def test_label_names_shown_in_chat_cannot_mention() -> None:
+    from chirpo.core.actions import AddLabels, IssueRef
+    from chirpo.core.outbound import ZWSP
+
+    world = await team()
+    world.codehost.labels[SANDBOX.key].add("@bob")
+    world.llm.answers = [[AddLabels(issue=IssueRef(number=1), labels=("@bob",))]]
+    text = await world.say("tag #1 with @bob")
+    assert "@bob" not in text and f"@{ZWSP}bob" in text
+    world.llm.answers = [[AddLabels(issue=IssueRef(number=1), labels=("@carol",))]]
+    question = await world.say("tag #1 with @carol")
+    assert "@carol" not in question and "@bob" not in question

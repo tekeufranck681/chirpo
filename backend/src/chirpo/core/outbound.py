@@ -10,9 +10,8 @@ the person confirming having read every character.
 """
 
 import re
-import unicodedata
 
-from chirpo.core.actions import unsafe_char
+from chirpo.core.context import clean
 
 ZWSP = "\u200b"
 
@@ -44,23 +43,26 @@ def neutralise(text: str) -> str:
 
 # A link or a t.me address: Telegram makes them tappable, so a model must not post one.
 _LINK = re.compile(r"https?://|www\.|\bt\.me/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
-# "/unlink" at the start of a word becomes a tappable bot command in a group.
-_COMMAND = re.compile(r"(?<!\S)/(?=\w)")
-_JOINERS = "\u200c\u200d"  # needed by some scripts and by emoji
+# "/unlink" becomes a tappable bot command in a group, also in quotes or brackets. A slash after a
+# letter, another slash or a colon is part of a path or a URL and stays.
+_COMMAND = re.compile(r"(?<![\w/:])/(?=\w)")
 
 
-def _hidden(char: str) -> bool:
-    """Format characters (word joiner, the Tag block, ...) can hide text or defeat the `@` break."""
-    return unicodedata.category(char) == "Cf" and char not in _JOINERS
+def _defuse(line: str) -> str:
+    return break_mentions(_COMMAND.sub("/" + ZWSP, line))
+
+
+def shown(text: str, limit: int) -> str:
+    """Outside text (an issue or milestone title, a display name) made safe to show in chat:
+    one visible line cut to `limit`, no invisible characters, no @mention that notifies anyone
+    and no tappable command. Links stay readable; link previews are off."""
+    return _defuse(clean(text, limit))
 
 
 def plain_reply(text: str, limit: int) -> str | None:
-    """Model-written chat text made safe to post, or None when it shouldn't be posted at all.
-
-    One visible line cut to `limit`, no invisible characters, no @mention that notifies anyone and
-    no tappable command; a reply containing a link is dropped (None) rather than repaired."""
-    visible = "".join(char for char in text if not unsafe_char(char) and not _hidden(char))
-    line = " ".join(visible.split())[:limit]
+    """Model-written chat text made safe to post, or None when it shouldn't be posted at all:
+    like `shown`, and a reply containing a link is dropped rather than repaired."""
+    line = clean(text, limit)
     if not line or _LINK.search(line):
         return None
-    return break_mentions(_COMMAND.sub("/" + ZWSP, line))
+    return _defuse(line)

@@ -8,7 +8,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from chirpo.core.actions import unsafe_char
+from chirpo.core.actions import hidden_char, unsafe_char
 from chirpo.core.domain import AttachmentKind, Issue, RecentMessage, RepoRef
 from chirpo.core.images import can_read
 from chirpo.core.pending import Step
@@ -126,6 +126,6 @@ def _media(message: RecentMessage, look_at: str | None) -> list[str]:
 
 
 def clean(text: str, limit: int) -> str:
-    """One visible line: no control, bidi or zero-width characters, no line breaks."""
-    visible = "".join(char for char in text if not unsafe_char(char))
+    """One visible line: no control, bidi, zero-width or format characters, no line breaks."""
+    visible = "".join(c for c in text if not unsafe_char(c) and not hidden_char(c))
     return " ".join(visible.split())[:limit]

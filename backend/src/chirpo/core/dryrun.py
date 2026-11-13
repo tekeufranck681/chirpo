@@ -18,9 +18,9 @@ from chirpo.core.actions import (
     SetStatus,
     UnassignIssue,
 )
-from chirpo.core.context import clean
+from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import RepoRef
-from chirpo.core.outbound import break_mentions
+from chirpo.core.outbound import shown
 from chirpo.core.resolution import Resolved
 
 MAX_TITLE = 256  # GitHub's limit: a title is always shown whole
@@ -51,9 +51,9 @@ def _lines(step: Resolved, default_repo: RepoRef, limit: int) -> list[str]:
             status = proposal.status.removeprefix("status: ")
             return [messages.DRY_STATUS.format(issue=issue, status=status)]
         case AddLabels():
-            return [messages.DRY_ADD_LABELS.format(labels=", ".join(proposal.labels), issue=issue)]
+            return [messages.DRY_ADD_LABELS.format(labels=_labels(proposal.labels), issue=issue)]
         case RemoveLabels():
-            labels = ", ".join(proposal.labels)
+            labels = _labels(proposal.labels)
             return [messages.DRY_REMOVE_LABELS.format(labels=labels, issue=issue)]
         case CommentOnIssue():
             return [messages.DRY_COMMENT.format(issue=issue, text=_text(proposal.body, limit))]
@@ -66,13 +66,11 @@ def _lines(step: Resolved, default_repo: RepoRef, limit: int) -> list[str]:
 
 
 def _draft(draft: IssueDraft, repo: str, limit: int) -> list[str]:
-    lines = [
-        messages.DRY_CREATE.format(repo=repo, title=break_mentions(clean(draft.title, MAX_TITLE)))
-    ]
+    lines = [messages.DRY_CREATE.format(repo=repo, title=shown(draft.title, MAX_TITLE))]
     if draft.assignees:
         lines.append(messages.DRY_ASSIGNED.format(people=_people(draft.assignees)))
     if draft.labels:
-        lines.append(messages.DRY_LABELS.format(labels=", ".join(draft.labels)))
+        lines.append(messages.DRY_LABELS.format(labels=_labels(draft.labels)))
     if draft.body:
         lines.append(messages.DRY_DETAILS.format(text=_text(draft.body, limit)))
     return lines
@@ -82,7 +80,7 @@ def _issue(step: Resolved, default_repo: RepoRef) -> str:
     if step.issue is None:
         return ""
     text = messages.DRY_ISSUE.format(
-        number=step.issue.number, title=break_mentions(clean(step.issue.title, MAX_TITLE))
+        number=step.issue.number, title=shown(step.issue.title, MAX_TITLE)
     )
     if step.repo != default_repo:
         text += messages.DRY_IN_REPO.format(repo=step.repo.full_name)
@@ -96,8 +94,12 @@ def _people(logins: Sequence[str]) -> str:
 
 def _text(text: str, limit: int) -> str:
     """Untrusted text as one visible line; what doesn't fit is counted, not silently dropped.
-    Mentions are broken: Telegram would notify whoever has that username."""
-    line = break_mentions(clean(text, 10_000))
+    Mentions and commands are broken: Telegram would notify whoever has that username."""
+    line = shown(text, 10_000)
     if len(line) <= limit:
         return line
     return line[:limit] + messages.DRY_MORE.format(count=len(line) - limit)
+
+
+def _labels(names: Sequence[str]) -> str:
+    return ", ".join(shown(name, MAX_NAME) for name in names)
