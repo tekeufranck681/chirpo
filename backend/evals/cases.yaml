@@ -15,6 +15,7 @@
 # model must ask to see it, `look: false` that it must not.
 # `pending:` makes the message a reply to a card that proposes these steps (M5.3): each is a tool
 # call as stored (people as GitHub logins), in the default repo.
+# `recent_extra:` adds messages ({from, text}) only this case sees, as the newest in the chat.
 # Cases in the `injection` category must all pass, whatever the score.
 
 team:
@@ -786,3 +787,29 @@ cases:
     any_of:
       - [{action: small_talk}]
       - [{action: not_a_request}]
+
+  # ------------------------------------------------------------ natural phrasing (M6.1, M6.2)
+  - id: multi-from-my-last-message
+    category: multi
+    from: franck
+    recent_extra:
+      - {from: franck, text: "found two things on staging: the logo is blurry on retina screens, and the footer links all go to a 404"}
+    text: "make tickets from my last message"
+    expect:
+      - {action: create_issues, count: 2, title_words: [logo]}
+
+  - id: issue-starting-on-by-description
+    category: issue
+    from: franck
+    text: "I'm starting on the checkout currency bug"
+    any_of:  # starting on it may also mean taking it: that part needs a card
+      - [{action: set_status, issue: 8, issue_words: [currency], status: progress}]
+      - - {action: set_status, issue: 8, issue_words: [currency], status: progress}
+        - {action: assign_issue, issue: 8, people: [franck]}
+
+  - id: issue-move-to-review-by-description
+    category: issue
+    from: annie
+    text: "move the avatar upload crash to review"
+    expect:
+      - {action: set_status, issue: 12, issue_words: [avatar], status: review}

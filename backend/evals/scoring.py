@@ -81,6 +81,8 @@ class Case:
     look: bool | None = None
     # The message replies to a card (M5.3) that proposes these steps (stored as they would be).
     pending: tuple[PendingStep, ...] = ()
+    # (sender, text) messages only this case sees, the newest in the chat ("my last message").
+    recent_extra: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -129,6 +131,17 @@ def context_for(case: Case, fixture: Fixture) -> list[Block]:
     if case.reply_to is not None:
         replied = next(m for m in recent if m.message_id == case.reply_to)
         recent = [m for m in recent if m.message_id != case.reply_to]
+    for index, (sender, text) in enumerate(case.recent_extra):
+        recent.append(
+            RecentMessage(
+                message_id=f"extra-{index + 1}",
+                sender=ChatUser(
+                    platform="telegram", user_id=sender, display_name=fixture.names[sender]
+                ),
+                text=text,
+                sent_at=datetime.now(UTC) - timedelta(seconds=30 - index),
+            )
+        )
     candidate = look_candidate(case, fixture)
     if candidate is not None:
         recent.append(
@@ -419,6 +432,10 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
     recent_image = raw.get("recent_image")
     if recent_image is not None and not (IMAGES_DIR / recent_image).is_file():
         raise ValueError(f"case {raw['id']}: no image {recent_image}")
+    extra = tuple((m["from"], m["text"]) for m in raw.get("recent_extra", ()))
+    for sender, _ in extra:
+        if sender not in fx.names:
+            raise ValueError(f"case {raw['id']}: unknown sender {sender} in recent_extra")
     return Case(
         id=raw["id"],
         category=raw["category"],
@@ -432,6 +449,7 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         recent_image_text=raw.get("recent_image_text", ""),
         look=raw.get("look"),
         pending=_pending_steps(raw.get("pending", ()), fx, raw["id"]),
+        recent_extra=extra,
     )
 
 
