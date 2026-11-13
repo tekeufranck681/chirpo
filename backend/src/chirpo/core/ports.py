@@ -30,7 +30,14 @@ from chirpo.core.domain import (
 from chirpo.core.llm import Interpretation, InterpretRequest
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
-from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
+from chirpo.core.workspaces import (
+    AuditEntry,
+    CodeHostAccount,
+    LinkedRepo,
+    Member,
+    Personality,
+    Workspace,
+)
 
 
 class MessagingAdapter(Protocol):
@@ -197,6 +204,8 @@ class Workspaces(Protocol):
         ...
 
     async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None: ...
+
+    async def set_personality(self, workspace_id: UUID, personality: Personality) -> None: ...
 
 
 class Members(Protocol):

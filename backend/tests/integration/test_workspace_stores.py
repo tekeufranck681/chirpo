@@ -348,3 +348,16 @@ async def test_context_is_kept_by_default_and_can_be_turned_off(stores: Stores) 
     assert not found.keeps_context
     await stores.workspaces.set_keeps_context(workspace.id, keep=True)
     assert (await stores.workspaces.get_or_create_for_chat(chat, name="Team")).keeps_context
+
+
+async def test_the_personality_defaults_to_light_and_survives_a_reload(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    assert workspace.personality == "light"
+    await stores.workspaces.set_personality(workspace.id, "playful")
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None and found.personality == "playful"
+    await stores.workspaces.set_personality(workspace.id, "off")
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None and found.personality == "off"
+    assert found.keeps_context  # another setting is left alone

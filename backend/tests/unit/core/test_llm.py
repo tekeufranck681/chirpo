@@ -13,7 +13,7 @@ from chirpo.core.tools import tool_specs
 
 class TestSystemPrompt:
     def test_lists_every_action(self) -> None:
-        prompt = system_prompt()
+        prompt = system_prompt(frozenset({"smalltalk"}))
         for name in ACTIONS:
             assert f"- `{name}`" in prompt, name
         assert "{actions}" not in prompt
@@ -41,7 +41,7 @@ class TestInterpretRequest:
 
     def test_instructions_are_the_fixed_prompt_then_the_marker(self) -> None:
         request = interpret_request("hi", "Franck", marker="m7f3a")
-        assert request.instructions.startswith(system_prompt())
+        assert request.instructions.startswith(system_prompt(frozenset({"smalltalk"})))
         assert request.instructions.endswith("This request's marker is `m7f3a`.")
 
     def test_a_fresh_marker_per_request(self) -> None:
@@ -161,7 +161,7 @@ class TestPromptSections:
             prompt = system_prompt(sections)
             assert "{actions}" not in prompt and "{sections}" not in prompt
             assert "## Untrusted text" in prompt and "## Examples" in prompt
-            assert all(f"- `{name}`" in prompt for name in ACTIONS)
+            assert all(f"- `{name}`" in prompt for name in ACTIONS if name != "small_talk")
 
     def test_the_common_prompt_is_shorter_than_the_full_one(self) -> None:
         assert len(system_prompt()) < len(system_prompt(frozenset({"images", "proposal"})))
@@ -174,4 +174,5 @@ class TestPromptSections:
         request = interpret_request(
             "x", "Franck", context=[("pending_proposal", "- create_issue {}")]
         )
-        assert request.instructions.startswith(system_prompt(frozenset({"proposal"})))
+        sections = frozenset({"proposal", "smalltalk"})  # light is the default personality
+        assert request.instructions.startswith(system_prompt(sections))

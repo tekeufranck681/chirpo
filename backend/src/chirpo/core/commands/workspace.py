@@ -5,7 +5,7 @@ from chirpo.core.commands.base import Actor, Request, allowed, audit, find_actor
 from chirpo.core.domain import AuditResult, RepoRef
 from chirpo.core.errors import LastAdminError
 from chirpo.core.permissions import Action, Role
-from chirpo.core.workspaces import Member
+from chirpo.core.workspaces import PERSONALITIES, Member
 
 MAX_LISTED = 50  # a chat message holds about 4,000 characters
 
@@ -108,6 +108,26 @@ async def context(request: Request) -> None:
     await audit(actor, Action.CHANGE_SETTINGS, AuditResult.EXECUTED, {"keep_context": keep})
     text = messages.CONTEXT_TURNED_ON if keep else messages.CONTEXT_TURNED_OFF
     await request.reply(text.format(hours=services.context_hours))
+
+
+async def personality(request: Request) -> None:
+    """How chatty the bot is in small talk (D24, M6.11): anyone can read it, admins change it."""
+    choice = request.args.strip().lower()
+    level = next((option for option in PERSONALITIES if option == choice), None)
+    if choice and level is None:
+        await request.reply(messages.PERSONALITY_USAGE)
+        return
+    actor = await find_actor(request, no_workspace=messages.NO_REPO_LINKED)
+    if actor is None:
+        return
+    if level is None:
+        await request.reply(messages.PERSONALITY_IS.format(level=actor.workspace.personality))
+        return
+    if not await allowed(request, actor, Action.CHANGE_SETTINGS):
+        return
+    await actor.services.workspaces.set_personality(actor.workspace.id, level)
+    await audit(actor, Action.CHANGE_SETTINGS, AuditResult.EXECUTED, {"personality": level})
+    await request.reply(messages.PERSONALITY_SET.format(level=level))
 
 
 async def members(request: Request) -> None:

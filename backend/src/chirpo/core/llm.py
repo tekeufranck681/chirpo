@@ -16,6 +16,7 @@ from importlib.resources import files
 from chirpo.core.actions import ACTIONS, ActionSpec, Proposal, unsafe_char
 from chirpo.core.permissions import Action
 from chirpo.core.tools import ToolSpec, tool_specs
+from chirpo.core.workspaces import DEFAULT_PERSONALITY, Personality
 
 MAX_MESSAGE_CHARS = 4000  # a Telegram message is at most 4096; anything longer is cut, not paid for
 MAX_SENDER_CHARS = 100
@@ -51,7 +52,9 @@ class Interpretation:
     output_tokens: int = 0
 
 
-SECTIONS = ("images", "proposal")  # prompts/<name>.md, in the order they are inserted
+SMALL_TALK = "small_talk"
+# prompts/<name>.md, in the order they are inserted
+SECTIONS = ("images", "proposal", "smalltalk", "playful")
 _MEDIA_BLOCKS = frozenset({"recent_messages", "replied_message"})
 _MEDIA_MARKERS = ("[image", "[file]", "[voice message]")  # written by us, see core/context.py
 
@@ -68,16 +71,28 @@ def system_prompt(sections: frozenset[str] = frozenset()) -> str:
         for name in SECTIONS
         if name in sections
     )
-    tools = "\n".join(_describe(spec) for spec in ACTIONS.values())
+    tools = "\n".join(
+        _describe(spec)
+        for spec in ACTIONS.values()
+        if spec.name != SMALL_TALK or "smalltalk" in sections  # not offered when personality is off
+    )
     text = template.replace("{actions}", tools).replace("{sections}", extra)
     return re.sub(r"\n{3,}", "\n\n", text).strip()  # no gap where a section was left out
 
 
 def _sections_for(
-    context: Sequence[tuple[str, str]], images: Sequence[RequestImage], look: bool
+    context: Sequence[tuple[str, str]],
+    images: Sequence[RequestImage],
+    look: bool,
+    personality: Personality,
 ) -> frozenset[str]:
-    """The rules this request can use. A marker typed into chat only adds rules, never removes."""
+    """The rules this request can use. A marker typed into chat only adds rules, never removes;
+    the workspace's personality decides the small talk rules."""
     sections = set()
+    if personality != "off":
+        sections.add("smalltalk")
+    if personality == "playful":
+        sections.add("playful")
     if any(kind == "pending_proposal" for kind, _ in context):
         sections.add("proposal")
     media = any(
@@ -99,20 +114,27 @@ def interpret_request(
     images: Sequence[RequestImage] = (),
     look: bool = False,
     marker: str | None = None,
+    personality: Personality = DEFAULT_PERSONALITY,
 ) -> InterpretRequest:
     """`context`: (kind, body) blocks from `core.context`, each wrapped like the message.
-    `look`: offer the tool that asks to see the most recent image (D52)."""
+    `look`: offer the tool that asks to see the most recent image (D52).
+    `personality`: the workspace's tone; `off` doesn't offer `small_talk` at all (M6.11)."""
     marker = marker or secrets.token_hex(8)
+    left_out = {
+        name
+        for name, offered in ((LOOK_TOOL, look), (SMALL_TALK, personality != "off"))
+        if not offered
+    }
     body = f"From: {_sender(sender)}\n{_clip(text)}"
     blocks = [_untrusted(kind, content, marker) for kind, content in context]
     blocks.append(_untrusted("chat_message", body, marker))
     return InterpretRequest(
         instructions=(
-            f"{system_prompt(_sections_for(context, images, look))}"
+            f"{system_prompt(_sections_for(context, images, look, personality))}"
             f"\n\nThis request's marker is `{marker}`."
         ),
         message="\n\n".join(blocks),
-        tools=tool_specs() if look else tuple(t for t in tool_specs() if t.name != LOOK_TOOL),
+        tools=tuple(tool for tool in tool_specs() if tool.name not in left_out),
         images=tuple(images),
     )
 

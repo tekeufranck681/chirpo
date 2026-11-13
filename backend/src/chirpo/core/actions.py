@@ -187,6 +187,17 @@ class NotARequest(Proposal):
     pass
 
 
+class SmallTalk(Proposal):
+    """A reply to a greeting, thanks, compliment or insult (M6.11). Text only: posted after
+    cleaning, never acted on, and dropped when the message also asks for something."""
+
+    # Deliberately lenient: one rejected call would void the whole answer, a request included.
+    # `plain_reply` (core/outbound.py) strips and bounds whatever arrives.
+    reply: str = Field(
+        description="One or two short sentences (under 280 characters) in the message's language."
+    )
+
+
 class LookAtRecentImage(Proposal):
     """No fields: chirpo knows which image (D52)."""
 
@@ -262,6 +273,14 @@ _SPECS = (
         "not_a_request",
         NotARequest,
         "The message asks for nothing chirpo can do.",
+        None,
+        False,
+    ),
+    ActionSpec(
+        "small_talk",
+        SmallTalk,
+        "Answer a greeting, thanks, compliment, joke request or insult with a short friendly "
+        "reply, when the message asks for nothing else. Text only: it does nothing on GitHub.",
         None,
         False,
     ),

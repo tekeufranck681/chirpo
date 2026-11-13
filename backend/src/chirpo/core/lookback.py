@@ -17,6 +17,7 @@ from chirpo.core.images import can_read
 from chirpo.core.llm import Interpretation, RequestImage, interpret_request
 from chirpo.core.ports import LLMProvider
 from chirpo.core.vision import Seen
+from chirpo.core.workspaces import DEFAULT_PERSONALITY, Personality
 
 RECENT_IMAGE_MINUTES = 10
 
@@ -64,6 +65,7 @@ async def interpret(
     candidate: Attachment | None,
     fetch: Fetch,
     charge: Charge | None = None,
+    personality: Personality = DEFAULT_PERSONALITY,
 ) -> Asked:
     """The tool is offered only when `candidate` exists, and only once: the second call can't ask
     again. Whatever else came with a request to look is ignored; the second answer decides.
@@ -72,7 +74,13 @@ async def interpret(
     marker = secrets.token_hex(8)  # the same for both calls: the question must not change
     first = await llm.interpret(
         interpret_request(
-            text, sender, context=context, images=images, look=candidate is not None, marker=marker
+            text,
+            sender,
+            context=context,
+            images=images,
+            look=candidate is not None,
+            marker=marker,
+            personality=personality,
         )
     )
     if charge is not None:
@@ -84,7 +92,12 @@ async def interpret(
         return Asked(_without_looks(first), list(seen.notes), failed=True)
     second = await llm.interpret(
         interpret_request(
-            text, sender, context=context, images=[*images, *seen.images], marker=marker
+            text,
+            sender,
+            context=context,
+            images=[*images, *seen.images],
+            marker=marker,
+            personality=personality,
         )
     )
     if charge is not None:
