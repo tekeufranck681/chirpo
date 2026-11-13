@@ -361,3 +361,17 @@ def test_recent_extra_senders_must_be_team_members() -> None:
     }
     with pytest.raises(ValueError, match="unknown sender"):
         _case(raw, FIXTURE)
+
+
+def test_milestone_current_accepts_the_ways_of_saying_this_sprint() -> None:
+    expected = case([{"action": "list_issues", "milestone": "current"}])
+    for written in ("current", "this sprint", "Current Sprint"):
+        assert score(expected, [ListIssues(milestone=written)], FIXTURE).passed, written
+    assert not score(expected, [ListIssues(milestone="v2.0")], FIXTURE).passed
+    assert not score(expected, [ListIssues()], FIXTURE).passed
+
+
+def test_a_named_milestone_must_match() -> None:
+    expected = case([{"action": "list_issues", "milestone": "v2.0"}])
+    assert score(expected, [ListIssues(milestone="V2.0")], FIXTURE).passed
+    assert not score(expected, [ListIssues(milestone="current")], FIXTURE).passed

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -23,6 +23,7 @@ from chirpo.core.domain import (
     LabelSpec,
     MergeMethod,
     MergeResult,
+    Milestone,
     NewIssue,
     PullRequest,
     PullRequestQuery,
@@ -422,6 +423,7 @@ class FakeCodeHost:
         self.pulls: dict[tuple[str, int], PullRequest] = {}
         self.comments: list[tuple[str, int, str]] = []
         self.labels: dict[str, set[str]] = {}
+        self.milestones: dict[str, list[Milestone]] = {}  # open ones, per repo key
         self.users: set[str] = {"franck"}
         self.logins: dict[str, str] = {}  # account id -> current login
         self.not_installed: set[str] = set()  # repo keys the App can't reach
@@ -507,8 +509,13 @@ class FakeCodeHost:
                 or any(same_login(query.assignee, who) for who in issue.assignees)
             )
             and set(query.labels) <= set(issue.labels)
+            and (query.milestone is None or issue.milestone == query.milestone)
         ]
         return found[: query.limit]
+
+    async def list_milestones(self, repo: RepoRef) -> list[Milestone]:
+        found = self.milestones.get(repo.key, [])
+        return sorted(found, key=lambda m: (m.due_on is None, m.due_on or date.min))
 
     async def add_comment(self, repo: RepoRef, number: int, body: str) -> str:
         await self.get_issue(repo, number)

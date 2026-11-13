@@ -2,12 +2,14 @@
 
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal
 
 from githubkit import GitHub, Response
 from githubkit.utils import UNSET
 from githubkit_schemas.latest.models import Issue as GitHubIssue
 from githubkit_schemas.latest.models import Label
+from githubkit_schemas.latest.models import Milestone as GitHubMilestone
 from githubkit_schemas.latest.models import (
     ReposOwnerRepoIssuesIssueNumberPatchResponse200 as GitHubUpdatedIssue,
 )
@@ -25,6 +27,7 @@ from chirpo.core.domain import (
     LabelSpec,
     MergeMethod,
     MergeResult,
+    Milestone,
     NewIssue,
     PullRequest,
     PullRequestQuery,
@@ -85,6 +88,7 @@ def _to_issue(repo: RepoRef, found: GitHubIssue | GitHubUpdatedIssue) -> Issue:
         author=found.user.login if found.user else None,
         created_at=found.created_at,
         updated_at=found.updated_at,
+        milestone=found.milestone.number if found.milestone else None,
     )
 
 
@@ -227,6 +231,7 @@ class GitHubAdapter:
                     state=state,
                     assignee=query.assignee or UNSET,
                     labels=",".join(query.labels) or UNSET,
+                    milestone=str(query.milestone) if query.milestone else UNSET,
                     per_page=PAGE_SIZE,
                     page=page,
                 )
@@ -291,6 +296,34 @@ class GitHubAdapter:
             if len(found) < PAGE_SIZE:
                 break
         return names
+
+    async def list_milestones(self, repo: RepoRef) -> list[Milestone]:
+        """One page: a hundred open milestones is far more than any team keeps open."""
+
+        def list_page(gh: GitHub[Any]) -> Awaitable[Response[Any, Any]]:
+            return gh.rest.issues.async_list_milestones(
+                repo.owner,
+                repo.name,
+                state="open",
+                sort="due_on",
+                direction="asc",
+                per_page=PAGE_SIZE,
+            )
+
+        found: list[GitHubMilestone] = await self._call(
+            repo, f"list milestones in {repo.full_name}", list_page
+        )
+        if len(found) >= PAGE_SIZE:
+            log.warning("milestone_list_truncated", repo=repo.full_name)
+        return [
+            Milestone(
+                number=item.number,
+                title=item.title,
+                # GitHub gives the due day as a time in UTC; that UTC date is the day meant.
+                due_on=item.due_on.astimezone(UTC).date() if item.due_on else None,
+            )
+            for item in found
+        ]
 
     async def user_exists(self, repo: RepoRef, username: str) -> bool:
         if not _LOGIN.fullmatch(username):

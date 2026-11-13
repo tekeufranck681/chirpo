@@ -62,6 +62,7 @@ Person = Annotated[
 ]
 Label = Annotated[Line, StringConstraints(min_length=1, max_length=50, pattern=r"^[^,]+$")]
 Body = Annotated[Text, StringConstraints(max_length=10_000)]
+MilestoneName = Annotated[Line, StringConstraints(min_length=1, max_length=100)]
 IssueStateFilter = Literal["open", "closed", "all"]
 
 
@@ -170,11 +171,21 @@ class ListIssues(RepoScoped):
     labels: tuple[Label, ...] = Field(
         default=(), max_length=10, description="Only issues with all of these labels."
     )
+    milestone: MilestoneName | None = Field(
+        default=None,
+        description='Only issues in this milestone (sprint), as the message names it; "current" '
+        "for this sprint.",
+    )
     limit: int = Field(default=10, ge=1, le=30, description="How many to show at most.")
 
 
 class MyIssues(RepoScoped):
     state: IssueStateFilter = Field(default="open", description="Which issues to list.")
+    milestone: MilestoneName | None = Field(
+        default=None,
+        description='Only issues in this milestone (sprint), as the message names it; "current" '
+        "for this sprint.",
+    )
 
 
 class AskClarifyingQuestion(Proposal):

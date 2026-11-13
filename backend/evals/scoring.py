@@ -31,6 +31,7 @@ from chirpo.core.images import sniff
 from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
 from chirpo.core.pending import Step as PendingStep
 from chirpo.core.permissions import Action, Role
+from chirpo.core.resolution import CURRENT_MILESTONE
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
 
 CASES_FILE = Path(__file__).with_name("cases.yaml")
@@ -50,6 +51,7 @@ _CHECKS = frozenset(
         "state",
         "title_words",
         "count",
+        "milestone",
     }
 )
 
@@ -288,6 +290,10 @@ def _check(step: Step, proposal: Proposal, case: Case, fx: Fixture) -> list[str]
         problems.append(f"{name}: unwanted labels {sorted(unwanted)}")
     if "status" in step and not _has_word([values["status"]], [step["status"]]):
         problems.append(f"{name}: status {values['status']!r}, expected {step['status']!r}")
+    if "milestone" in step and not _same_milestone(step["milestone"], values.get("milestone")):
+        problems.append(
+            f"{name}: milestone {values.get('milestone')!r}, expected {step['milestone']!r}"
+        )
     if "reason" in step and str(values["reason"]) != step["reason"]:
         problems.append(f"{name}: reason {values['reason']}, expected {step['reason']}")
     if "repo" in step and not _same_repo(step["repo"], values.get("repo")):
@@ -474,3 +480,13 @@ def _pending_steps(
 def _repo(full_name: str) -> RepoRef:
     owner, name = full_name.split("/")
     return RepoRef(provider="github", owner=owner, name=name)
+
+
+def _same_milestone(expected: str, written: object) -> bool:
+    """`current` accepts any way of saying the sprint we're in; a name must match."""
+    if not isinstance(written, str):
+        return False
+    said = " ".join(written.casefold().split())
+    if expected == "current":
+        return said in CURRENT_MILESTONE
+    return said == " ".join(expected.casefold().split())

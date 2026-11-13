@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator
+from datetime import date
 from typing import Any
 
 import httpx
@@ -601,3 +602,40 @@ async def test_current_login_rejects_ids_that_are_not_numbers(
 ) -> None:
     assert await adapter.current_login(REPO, "../users/x") is None
     assert not github.calls
+
+
+# ------------------------------------------------------------------ milestones (M6.3)
+
+MILESTONES = "/repos/tekeufranck681/chirpo/milestones"
+
+
+async def test_open_milestones_are_listed_soonest_due_first(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    route = github.get(MILESTONES).respond(json=payload("milestones"))
+
+    milestones = await adapter.list_milestones(REPO)
+
+    assert [(m.number, m.title, m.due_on) for m in milestones] == [
+        (2, "Sprint 12", date(2026, 11, 20)),
+        (3, "v2.0", None),
+    ]
+    assert params(route) == {
+        "state": "open",
+        "sort": "due_on",
+        "direction": "asc",
+        "per_page": str(PAGE_SIZE),
+    }
+
+
+async def test_issues_are_listed_by_milestone_and_carry_theirs(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    page = payload("issues_page")
+    page[0]["milestone"] = payload("milestones")[0]
+    route = github.get(ISSUES).respond(json=page)
+
+    issues = await adapter.list_issues(REPO, IssueQuery(milestone=2))
+
+    assert params(route)["milestone"] == "2"
+    assert issues[0].milestone == 2
