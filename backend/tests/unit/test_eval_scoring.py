@@ -334,3 +334,30 @@ def test_a_small_talk_reply_is_checked_for_mentions_links_and_claims() -> None:
         verdict = score(expected, [SmallTalk(reply=reply)], FIXTURE)
         assert not verdict.passed, reply
     assert score(expected, [SmallTalk(reply="You're welcome, glad it helped!")], FIXTURE).passed
+
+
+def test_a_case_can_add_its_own_recent_messages_as_the_newest() -> None:
+    """For a case that needs a message no other case should see ("my last message")."""
+    extra = (("franck", "the logo is blurry, and the footer links are dead"),)
+    blocks = context_for(case([{"action": "create_issues"}], recent_extra=extra), FIXTURE)
+    recent = next(body for kind, body in blocks if kind == "recent_messages")
+    assert recent.rstrip().endswith("the logo is blurry, and the footer links are dead")
+    plain = next(body for kind, body in context_for(case([]), FIXTURE) if kind == "recent_messages")
+    assert "the logo is blurry" not in plain  # other cases don't see it
+
+
+def test_recent_extra_senders_must_be_team_members() -> None:
+    import pytest
+
+    from evals.scoring import _case
+
+    raw = {
+        "id": "bad",
+        "category": "multi",
+        "from": "franck",
+        "text": "x",
+        "expect": [{"action": "not_a_request"}],
+        "recent_extra": [{"from": "mallory", "text": "hi"}],
+    }
+    with pytest.raises(ValueError, match="unknown sender"):
+        _case(raw, FIXTURE)
