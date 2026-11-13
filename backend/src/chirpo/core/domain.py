@@ -4,6 +4,7 @@ Models arrive with the features that need them.
 """
 
 import re
+from datetime import date
 from enum import StrEnum
 from typing import Literal
 
@@ -207,6 +208,17 @@ class Issue(BaseModel):
     author: str | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    milestone: int | None = None  # its number on the code host
+
+
+class Milestone(BaseModel):
+    """A GitHub milestone; teams use them as sprints (M6.3). The title is outside text."""
+
+    model_config = ConfigDict(frozen=True)
+
+    number: int
+    title: str
+    due_on: date | None = None
 
 
 class NewIssue(BaseModel):
@@ -246,6 +258,7 @@ class IssueQuery(BaseModel):
     state: IssueState | Literal["all"] = IssueState.OPEN
     assignee: str | None = None
     labels: tuple[str, ...] = ()
+    milestone: int | None = None
     limit: int = Field(default=30, ge=1, le=100)
 
     @field_validator("labels")

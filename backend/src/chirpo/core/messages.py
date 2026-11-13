@@ -261,6 +261,16 @@ DRY_CLOSE = "• Close {issue} as {reason}"
 DRY_REOPEN = "• Reopen {issue}"
 DRY_FILTER_ASSIGNEE = " assigned to {login}"
 DRY_FILTER_LABELS = " labelled {labels}"
+DRY_FILTER_MILESTONE = " in {title}"
+DRY_FILTER_DUE = " (due {day} {month})"
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+NO_MILESTONE = "There's no open milestone in {repo}, so I can't tell which sprint you mean."
+WHICH_MILESTONE = "Which milestone do you mean: {names}?"
+MILESTONE_DUPLICATE = (
+    'There are {count} open milestones called "{name}" in {repo}. Rename one on GitHub so I can '
+    "tell them apart."
+)
+MILESTONE_UNKNOWN = 'I can\'t find an open milestone called "{name}" in {repo}. Open ones: {names}.'
 DRY_ISSUE = '#{number} "{title}"'
 ISSUES_TITLE = "{state} issues in {repo}{filters}:"
 ISSUES_NONE = "No {state} issues in {repo}{filters}."

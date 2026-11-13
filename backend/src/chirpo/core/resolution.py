@@ -8,6 +8,7 @@ the repo's open issues and existing labels. Anything unclear becomes a question,
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 
 from chirpo.core import messages
 from chirpo.core.actions import (
@@ -31,12 +32,27 @@ from chirpo.core.actions import (
     UnassignIssue,
 )
 from chirpo.core.context import MAX_NAME, Team, clean
-from chirpo.core.domain import Issue, IssueQuery, IssueState, RepoRef
+from chirpo.core.domain import Issue, IssueQuery, IssueState, Milestone, RepoRef
 from chirpo.core.errors import CodeHostNotFoundError
 from chirpo.core.ports import CodeHostAdapter
 from chirpo.core.workspaces import Member
 
 ME = frozenset({"me", "myself", "i"})
+# Ways of saying "the sprint we're in" (M6.3).
+CURRENT_MILESTONE = frozenset(
+    {
+        "current",
+        "sprint",
+        "this sprint",
+        "current sprint",
+        "the current sprint",
+        "the sprint",
+        "this milestone",
+        "current milestone",
+        "the current milestone",
+    }
+)
+MAX_MILESTONES_NAMED = 5
 STATUS_LABELS = {
     "todo": "status: todo",
     "in progress": "status: in progress",
@@ -77,6 +93,7 @@ class Resolved:
     login: str | None = None  # the sender's, for "my issues"
     notes: tuple[str, ...] = ()  # what was left out, e.g. labels the repo doesn't have
     ref: IssueRef | None = None  # how the model named the issue, before it became a number
+    milestone: Milestone | None = None  # the sprint a list is limited to (M6.3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +154,7 @@ class _Resolver:
         repo = await self._repo(proposal.repo)
         update: dict[str, object] = {"repo": repo.full_name}
         notes: list[str] = []
-        issue, ref = None, None
+        issue, ref, milestone = None, None, None
         if isinstance(proposal, OnIssue):
             ref = proposal.issue
             issue = await self._issue(
@@ -164,6 +181,8 @@ class _Resolver:
                     update["assignee"] = self._login(proposal.assignee)
                 if proposal.labels:
                     update["labels"] = await self._labels_or_ask(repo, proposal.labels)
+        if isinstance(proposal, ListIssues | MyIssues) and proposal.milestone:
+            milestone = await self._milestone(repo, proposal.milestone)
         login = self._login("me") if isinstance(proposal, MyIssues) else None
         return Resolved(
             proposal=_revalidated(proposal, update),
@@ -172,6 +191,42 @@ class _Resolver:
             login=login,
             notes=tuple(notes),
             ref=ref,
+            milestone=milestone,
+        )
+
+    async def _milestone(self, repo: RepoRef, wanted: str) -> Milestone:
+        """A title first, so a milestone named "Sprint" can be picked; then "current" (or "this
+        sprint"): the open milestone due soonest, overdue ones included, since an open sprint
+        isn't over (D59). Only open milestones are searched."""
+        found = await self.codehost.list_milestones(repo)
+        if not found:
+            raise _Unclear(messages.NO_MILESTONE.format(repo=repo.full_name))
+        name = _normal(wanted)
+        same = [m for m in found if _normal(m.title) == name]
+        if len(same) == 1:
+            return same[0]
+        if same:
+            raise _Unclear(
+                _short(
+                    messages.MILESTONE_DUPLICATE.format(
+                        count=len(same), name=clean(wanted, MAX_NAME), repo=repo.full_name
+                    )
+                )
+            )
+        names = ", ".join(clean(m.title, MAX_NAME) for m in found[:MAX_MILESTONES_NAMED])
+        if name in CURRENT_MILESTONE:
+            dated = [m for m in found if m.due_on is not None]
+            if dated:
+                return min(dated, key=lambda m: m.due_on or date.max)
+            if len(found) == 1:
+                return found[0]
+            raise _Unclear(_short(messages.WHICH_MILESTONE.format(names=names)))
+        raise _Unclear(
+            _short(
+                messages.MILESTONE_UNKNOWN.format(
+                    name=clean(wanted, MAX_NAME), repo=repo.full_name, names=names
+                )
+            )
         )
 
     async def _repo(self, name: str | None) -> RepoRef:
@@ -343,3 +398,11 @@ def significant_words(text: str) -> set[str]:
 
 def _quoted(names: Sequence[str]) -> str:
     return ", ".join(f'"{name}"' for name in names)
+
+
+def _normal(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def _short(question: str) -> str:
+    return clean(question, MAX_QUESTION)

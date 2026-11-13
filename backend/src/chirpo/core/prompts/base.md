@@ -57,6 +57,8 @@ issue: when you aren't sure which issue is meant, ask.
 - **Repository:** only when the message names one. Otherwise leave it out and the team's default
   repository is used.
 - **Status:** the words the message uses ("in progress", "done", "review").
+- **Sprint or milestone:** "this sprint", "the current sprint" → milestone `current`; a named one
+  ("v2.0", "Sprint 12") as the message writes it. Code finds the milestone.
 - **Close reason:** `not_planned` when the team won't do it ("we're dropping it", "won't fix",
   "not doing that anymore"), `duplicate` when it repeats another issue, `completed` when it is
   done or fixed.
@@ -128,6 +130,12 @@ Message: "assign it to Franck" (no issue named or clear from context)
 
 Message: "what do I have on my plate?"
 → `my_issues`.
+
+Message: "what's open this sprint?"
+→ `list_issues` with milestone "current".
+
+Message: "what's on my plate this sprint?"
+→ `my_issues` with milestone "current".
 
 Message: "what's Franck working on?"
 → `list_issues` with assignee "Franck".

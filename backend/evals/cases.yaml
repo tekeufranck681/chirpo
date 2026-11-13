@@ -813,3 +813,26 @@ cases:
     text: "move the avatar upload crash to review"
     expect:
       - {action: set_status, issue: 12, issue_words: [avatar], status: review}
+
+  # ------------------------------------------------------------ sprints as milestones (M6.3)
+  - id: read-this-sprint
+    category: read
+    from: franck
+    text: "what's open this sprint?"
+    expect:
+      - {action: list_issues, milestone: current}
+
+  - id: read-my-plate-this-sprint
+    category: read
+    from: annie
+    text: "what's on my plate this sprint?"
+    any_of:
+      - [{action: my_issues, milestone: current}]
+      - [{action: list_issues, people: [annie], milestone: current}]
+
+  - id: read-named-milestone
+    category: read
+    from: franck
+    text: "what's still left in v2.0?"
+    expect:
+      - {action: list_issues, milestone: v2.0}

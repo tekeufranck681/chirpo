@@ -19,6 +19,7 @@ from chirpo.core.domain import (
     LabelSpec,
     MergeMethod,
     MergeResult,
+    Milestone,
     NewIssue,
     PullRequest,
     PullRequestQuery,
@@ -147,6 +148,10 @@ class CodeHostAdapter(Protocol):
 
     async def list_labels(self, repo: RepoRef) -> list[str]:
         """The repo's label names, spelled as on the code host."""
+        ...
+
+    async def list_milestones(self, repo: RepoRef) -> list[Milestone]:
+        """The repo's open milestones, the soonest due first and those without a date last."""
         ...
 
     async def user_exists(self, repo: RepoRef, username: str) -> bool:
