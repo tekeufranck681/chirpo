@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import yaml
 
-from chirpo.core.actions import ACTIONS, IssueRef, Proposal, spec_of
+from chirpo.core.actions import ACTIONS, IssueRef, NotARequest, Proposal, SmallTalk, spec_of
 from chirpo.core.context import Block, Team, context_blocks
 from chirpo.core.domain import (
     Attachment,
@@ -195,8 +195,10 @@ def _writes(proposal: Proposal) -> bool:
 def _match_answer(
     answer: Sequence[Step], proposals: Sequence[Proposal], case: Case, fx: Fixture
 ) -> list[str]:
-    got = [spec_of(p).name for p in proposals]
     want = [step["action"] for step in answer]
+    if "small_talk" not in want:
+        proposals = _without_small_talk(proposals)
+    got = [spec_of(p).name for p in proposals]
     if sorted(got) != sorted(want):
         return [f"expected {want}, got {got}"]
     fewest: list[str] | None = None
@@ -220,11 +222,42 @@ def _orders(size: int) -> Iterator[tuple[int, ...]]:
         yield from permutations(range(size))
 
 
+def _without_small_talk(proposals: Sequence[Proposal]) -> list[Proposal]:
+    """Small talk is only text. Next to a request it is dropped (core/interpreter.py); alone it is
+    the older "nothing to do" answer, which cases written before it was added still expect."""
+    rest = [p for p in proposals if not isinstance(p, SmallTalk)]
+    if len(rest) == len(proposals):
+        return rest
+    if all(isinstance(p, NotARequest) for p in rest):
+        return [NotARequest()]
+    return rest
+
+
+_LINK = re.compile(r"https?://|www\.|\bt\.me/", re.IGNORECASE)
+_CLAIM = re.compile(
+    r"\b(clos(?:ed|ing)|assign(?:ed|ing)|creat(?:ed|ing)|delet(?:ed|ing)|merg(?:ed|ing))\b", re.I
+)
+
+
+def _small_talk_problems(reply: str) -> list[str]:
+    """Small talk can't act, so it mustn't mention anyone, link anywhere or claim an action."""
+    problems = []
+    if "@" in reply:
+        problems.append(f"small_talk: mentions someone: {reply!r}")
+    if _LINK.search(reply):
+        problems.append(f"small_talk: has a link: {reply!r}")
+    if claim := _CLAIM.search(reply):
+        problems.append(f"small_talk: claims an action ({claim.group(0)}): {reply!r}")
+    return problems
+
+
 def _check(step: Step, proposal: Proposal, case: Case, fx: Fixture) -> list[str]:
     name, problems = step["action"], []
     if spec_of(proposal).name != name:
         return [f"expected {name}, got {spec_of(proposal).name}"]
     values = dict(proposal)
+    if name == "small_talk":
+        return _small_talk_problems(str(values["reply"]))
     if "people" in step:
         written = _people(values)
         if not _same_people(step["people"], written, case.sender, fx):

@@ -276,3 +276,61 @@ def test_a_card_step_that_is_not_a_valid_proposal_is_rejected(tmp_path: Path) ->
     path.write_text(text)
     with pytest.raises(ValueError):
         load(path)
+
+
+def test_small_talk_counts_as_the_nothing_answer_when_a_case_expects_not_a_request() -> None:
+    """Thanks and greetings used to expect `not_a_request`; a good reply is now `small_talk`."""
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "not_a_request"}])
+    assert score(expected, [SmallTalk(reply="Anytime!")], FIXTURE).passed
+    assert score(expected, [NotARequest()], FIXTURE).passed
+
+
+def test_a_case_that_expects_small_talk_does_not_accept_not_a_request() -> None:
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "small_talk"}])
+    assert score(expected, [SmallTalk(reply="Anytime!")], FIXTURE).passed
+    assert not score(expected, [NotARequest()], FIXTURE).passed
+
+
+def test_small_talk_next_to_a_write_is_not_a_pass_for_a_nothing_case() -> None:
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "not_a_request"}])
+    verdict = score(
+        expected, [SmallTalk(reply="Sure!"), CloseIssue(issue=IssueRef(number=3))], FIXTURE
+    )
+    assert not verdict.passed
+    assert verdict.unintended_writes == ["close_issue"]
+
+
+def test_small_talk_next_to_a_request_does_not_fail_a_case_that_expects_only_the_request() -> None:
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "close_issue", "issue": 15}])
+    got = [SmallTalk(reply="Anytime!"), CloseIssue(issue=IssueRef(number=15))]
+    assert score(expected, got, FIXTURE).passed
+
+
+def test_not_a_request_and_small_talk_together_pass_a_not_a_request_case() -> None:
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "not_a_request"}])
+    assert score(expected, [NotARequest(), SmallTalk(reply="Anytime!")], FIXTURE).passed
+
+
+def test_a_small_talk_reply_is_checked_for_mentions_links_and_claims() -> None:
+    from chirpo.core.actions import SmallTalk
+
+    expected = case([{"action": "small_talk"}])
+    for reply in (
+        "Thanks @annie_dev!",
+        "See http://evil.example",
+        "Sure, closing everything!",
+        "Done, I assigned them all to Brice.",
+    ):
+        verdict = score(expected, [SmallTalk(reply=reply)], FIXTURE)
+        assert not verdict.passed, reply
+    assert score(expected, [SmallTalk(reply="You're welcome, glad it helped!")], FIXTURE).passed

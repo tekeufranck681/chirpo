@@ -1,12 +1,17 @@
 """Workspaces: a team with its chats, repos and members, their accounts, and the audit log."""
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from chirpo.core.domain import AuditResult, RepoRef
 from chirpo.core.permissions import Role
+
+# How chatty the bot is when someone makes small talk (D24, M6.11).
+Personality = Literal["off", "light", "playful"]
+PERSONALITIES: tuple[Personality, ...] = ("off", "light", "playful")
+DEFAULT_PERSONALITY: Personality = "light"
 
 
 class Workspace(BaseModel):
@@ -15,6 +20,7 @@ class Workspace(BaseModel):
     id: UUID
     name: str
     keeps_context: bool = True  # recent messages kept for the LLM (D46); admins turn it off
+    personality: Personality = DEFAULT_PERSONALITY  # admins change it with /personality
 
 
 class LinkedRepo(BaseModel):

@@ -18,6 +18,7 @@ Commands:
 /role @name admin|maintainer|member - change someone's role (admins)
 /unlink owner/repo - disconnect a repo (admins)
 /context on|off - keep recent messages so I understand follow-ups (admins)
+/personality off|light|playful - how chatty I am (admins)
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -126,6 +127,14 @@ CONTEXT_TURNED_ON = "Done: I'll keep this chat's messages for {hours} hours as c
 CONTEXT_TURNED_OFF = "Done: I no longer keep this chat's messages, and deleted the ones I had."
 CONTEXT_OFF_FOR_INSTANCE = "This chirpo keeps no messages: its operator turned context off."
 CONTEXT_USAGE = "Usage: /context on or /context off (admins). /context alone shows the setting."
+PERSONALITY_IS = (
+    "My tone here is {level}: off is short and neutral, light adds a friendly reply to thanks "
+    "and greetings, playful also allows jokes. An admin can change it with /personality."
+)
+PERSONALITY_SET = "Done: my tone here is now {level}."
+PERSONALITY_USAGE = (
+    "Usage: /personality off, light or playful (admins). /personality alone shows the setting."
+)
 ALREADY_LINKED = "{repo} is already linked here."
 
 UNLINK_USAGE = "Tell me which repo: /unlink owner/repo"

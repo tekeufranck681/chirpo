@@ -484,3 +484,36 @@ async def test_issue_creation_is_limited_per_person(world: World) -> None:
     assert await world.say("/issue Three") == messages.WRITE_LIMITED.format(wait="1 hour")
     assert await world.say("/issue Four") == ""
     assert len(world.codehost.issues) == 2
+
+
+async def test_personality_status_for_anyone(world: World) -> None:
+    await linked_by_annie(world)
+    await world.verified(FRANCK, FRANCK_GITHUB)
+    assert await world.say("/personality", FRANCK) == messages.PERSONALITY_IS.format(level="light")
+
+
+async def test_admins_change_the_personality_and_it_is_audited(world: World) -> None:
+    await linked_by_annie(world)
+    assert await world.say("/personality PLAYFUL") == messages.PERSONALITY_SET.format(
+        level="playful"
+    )
+    assert (await world.workspaces.for_chat(CHAT)).personality == "playful"  # type: ignore[union-attr]
+    assert await world.say("/personality") == messages.PERSONALITY_IS.format(level="playful")
+    assert world.audited() == [("change_settings", AuditResult.EXECUTED, None)]
+    assert world.audit.entries[0].payload == {"personality": "playful"}
+
+
+async def test_members_cannot_change_the_personality(world: World) -> None:
+    await linked_by_annie(world)
+    await world.verified(FRANCK, FRANCK_GITHUB)
+    assert await world.say("/personality off", FRANCK) == messages.ROLE_TOO_LOW.format(role="admin")
+    assert (await world.workspaces.for_chat(CHAT)).personality == "light"  # type: ignore[union-attr]
+
+
+async def test_personality_usage(world: World) -> None:
+    await linked_by_annie(world)
+    assert await world.say("/personality grumpy") == messages.PERSONALITY_USAGE
+
+
+async def test_help_mentions_personality() -> None:
+    assert "/personality" in messages.HELP

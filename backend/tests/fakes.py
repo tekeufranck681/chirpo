@@ -45,7 +45,14 @@ from chirpo.core.errors import (
 from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
-from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
+from chirpo.core.workspaces import (
+    AuditEntry,
+    CodeHostAccount,
+    LinkedRepo,
+    Member,
+    Personality,
+    Workspace,
+)
 
 CHAT = ChatRef(platform="fake", chat_id="-100")
 USER = ChatUser(platform="fake", user_id="42", display_name="Annie", username="annie")
@@ -624,6 +631,11 @@ class FakeWorkspaces:
         for key, workspace in self.by_chat.items():
             if workspace.id == workspace_id:
                 self.by_chat[key] = workspace.model_copy(update={"keeps_context": keep})
+
+    async def set_personality(self, workspace_id: UUID, personality: Personality) -> None:
+        for key, workspace in self.by_chat.items():
+            if workspace.id == workspace_id:
+                self.by_chat[key] = workspace.model_copy(update={"personality": personality})
 
 
 class FakeMembers:

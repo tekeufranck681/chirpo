@@ -23,7 +23,16 @@ from chirpo.core.errors import LastAdminError
 from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
-from chirpo.core.workspaces import AuditEntry, CodeHostAccount, LinkedRepo, Member, Workspace
+from chirpo.core.workspaces import (
+    DEFAULT_PERSONALITY,
+    PERSONALITIES,
+    AuditEntry,
+    CodeHostAccount,
+    LinkedRepo,
+    Member,
+    Personality,
+    Workspace,
+)
 from chirpo.db import models as db
 from chirpo.db.models import PollCursor, ProcessedEvent
 from chirpo.security import DecryptionError, Encryptor
@@ -59,6 +68,7 @@ class SqlProcessedEvents:
 
 
 KEEP_CONTEXT = "keep_context"  # key in workspaces.settings
+PERSONALITY = "personality"  # key in workspaces.settings
 
 
 MAX_KEPT_ATTACHMENTS = 10
@@ -231,8 +241,12 @@ def _winner[T](found: T | None) -> T:
 
 
 def _to_workspace(row: db.Workspace) -> Workspace:
+    stored = row.settings.get(PERSONALITY)
     return Workspace(
-        id=row.id, name=row.name, keeps_context=row.settings.get(KEEP_CONTEXT, True) is not False
+        id=row.id,
+        name=row.name,
+        keeps_context=row.settings.get(KEEP_CONTEXT, True) is not False,
+        personality=stored if stored in PERSONALITIES else DEFAULT_PERSONALITY,
     )
 
 
@@ -387,6 +401,19 @@ class SqlWorkspaces:
             .where(db.Workspace.id == workspace_id)
             .values(
                 settings=db.Workspace.settings.op("||")(func.jsonb_build_object(KEEP_CONTEXT, keep))
+            )
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def set_personality(self, workspace_id: UUID, personality: Personality) -> None:
+        statement = (
+            update(db.Workspace)
+            .where(db.Workspace.id == workspace_id)
+            .values(
+                settings=db.Workspace.settings.op("||")(
+                    func.jsonb_build_object(PERSONALITY, personality)
+                )
             )
         )
         async with self._sessions.begin() as session:

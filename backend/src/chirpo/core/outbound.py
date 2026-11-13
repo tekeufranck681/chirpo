@@ -10,6 +10,9 @@ the person confirming having read every character.
 """
 
 import re
+import unicodedata
+
+from chirpo.core.actions import unsafe_char
 
 ZWSP = "\u200b"
 
@@ -37,3 +40,27 @@ def neutralise(text: str) -> str:
     text = _ACTIVE_TAG.sub("&lt;", text)
     text = _CLOSING.sub(lambda m: m.group(1) + ZWSP, text)
     return break_mentions(text)
+
+
+# A link or a t.me address: Telegram makes them tappable, so a model must not post one.
+_LINK = re.compile(r"https?://|www\.|\bt\.me/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+# "/unlink" at the start of a word becomes a tappable bot command in a group.
+_COMMAND = re.compile(r"(?<!\S)/(?=\w)")
+_JOINERS = "\u200c\u200d"  # needed by some scripts and by emoji
+
+
+def _hidden(char: str) -> bool:
+    """Format characters (word joiner, the Tag block, ...) can hide text or defeat the `@` break."""
+    return unicodedata.category(char) == "Cf" and char not in _JOINERS
+
+
+def plain_reply(text: str, limit: int) -> str | None:
+    """Model-written chat text made safe to post, or None when it shouldn't be posted at all.
+
+    One visible line cut to `limit`, no invisible characters, no @mention that notifies anyone and
+    no tappable command; a reply containing a link is dropped (None) rather than repaired."""
+    visible = "".join(char for char in text if not unsafe_char(char) and not _hidden(char))
+    line = " ".join(visible.split())[:limit]
+    if not line or _LINK.search(line):
+        return None
+    return break_mentions(_COMMAND.sub("/" + ZWSP, line))

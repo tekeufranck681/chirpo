@@ -53,6 +53,7 @@ class TestRegistry:
             "my_issues",
             "ask_clarifying_question",
             "not_a_request",
+            "small_talk",
             "look_at_recent_image",
         }
 
@@ -341,6 +342,7 @@ class TestParseToolCall:
             "list_issues": {"assignee": "Franck", "labels": ["bug"], "state": "all"},
             "my_issues": {"state": "closed"},
             "ask_clarifying_question": {"question": "Which Franck?"},
+            "small_talk": {"reply": "You're welcome!"},
             "not_a_request": {},
             "look_at_recent_image": {},
         }

@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
 from chirpo.core import messages
-from chirpo.core.actions import permission_of, spec_of
+from chirpo.core.actions import SmallTalk, permission_of, spec_of
 from chirpo.core.commands.base import (
     Actor,
     Request,
@@ -51,12 +51,15 @@ from chirpo.core.listing import is_read, run_read
 from chirpo.core.llm import Interpretation, RequestImage
 from chirpo.core.lookback import Asked, Charge, recent_image
 from chirpo.core.lookback import interpret as ask_with_lookback
+from chirpo.core.outbound import plain_reply
 from chirpo.core.pending import PendingAction, PendingStatus
 from chirpo.core.permissions import Action
 from chirpo.core.ports import LLMProvider
 from chirpo.core.resolution import Question, Resolved, resolve
 from chirpo.core.vision import Seen, gather_images, gather_recent
-from chirpo.core.workspaces import LinkedRepo
+from chirpo.core.workspaces import LinkedRepo, Personality
+
+MAX_SMALL_TALK = 280  # characters of a small talk reply, before escaping
 
 RECENT_MESSAGES = 20
 TYPING_REFRESH_SECONDS = 4.0  # Telegram shows "typing…" for 5 seconds per request
@@ -209,6 +212,7 @@ async def _answer_timed(
         images=seen.images,
         candidate=look.attachment if look else None,
         charge=_charger(services, actor),
+        personality=actor.workspace.personality,
     )
     notes = seen.notes
     del seen  # the image bytes are done with
@@ -242,7 +246,8 @@ async def _answer_timed(
         await request.reply(_with_notes(result.text, notes))
         return
     if not result:
-        nothing = messages.NOT_A_REQUEST.format(bot=request.messaging.bot_mention())
+        nothing = _small_talk(interpretation, actor.workspace.personality)
+        nothing = nothing or messages.NOT_A_REQUEST.format(bot=request.messaging.bot_mention())
         if replacing is not None:  # "ok, looks good": only the buttons confirm
             nothing = messages.USE_THE_BUTTONS
         await request.reply(_with_notes(nothing, notes))
@@ -340,6 +345,18 @@ async def _conversation(
     return recent, replied
 
 
+def _small_talk(interpretation: Interpretation, personality: Personality) -> str | None:
+    """The model's small talk, cleaned like everything we post, or None to use the fixed text.
+    Only when the workspace allows it (the tool isn't offered when it doesn't, but a model could
+    still call it). It is model text, so `plain_reply` makes it safe or drops it."""
+    if personality == "off":
+        return None
+    for proposal in interpretation.proposals:
+        if isinstance(proposal, SmallTalk):
+            return plain_reply(proposal.reply, MAX_SMALL_TALK)
+    return None
+
+
 async def _ask_model(
     request: Request,
     llm: LLMProvider,
@@ -349,6 +366,7 @@ async def _ask_model(
     images: Sequence[RequestImage],
     candidate: Attachment | None,
     charge: Charge,
+    personality: Personality,
 ) -> Asked | None:
     """The model's answer, or None after telling the person why there is none."""
     sender = request.message.sender.display_name
@@ -366,6 +384,7 @@ async def _ask_model(
             candidate=candidate,
             fetch=fetch,
             charge=charge,
+            personality=personality,
         )
     except LLMRateLimitedError:
         await request.reply(messages.LLM_BUSY)

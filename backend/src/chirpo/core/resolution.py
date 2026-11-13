@@ -27,6 +27,7 @@ from chirpo.core.actions import (
     ReopenIssue,
     RepoScoped,
     SetStatus,
+    SmallTalk,
     UnassignIssue,
 )
 from chirpo.core.context import MAX_NAME, Team, clean
@@ -113,7 +114,7 @@ async def resolve(
         return [
             await resolver.one(proposal)
             for proposal in proposals
-            if not isinstance(proposal, NotARequest)
+            if not isinstance(proposal, NotARequest | SmallTalk)
         ]
     except _Unclear as unclear:
         return Question(unclear.question)
