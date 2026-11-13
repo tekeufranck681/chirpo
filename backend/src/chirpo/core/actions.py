@@ -32,6 +32,12 @@ _INVISIBLE = frozenset(
 _CONTROL_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})  # control characters, line/paragraph separators
 
 
+def hidden_char(char: str) -> bool:
+    """A format character (word joiner, soft hyphen, the Tag block, ...) that can hide text or
+    split an @mention. The two joiners stay: emoji and some scripts need them."""
+    return unicodedata.category(char) == "Cf" and char not in "\u200c\u200d"
+
+
 def unsafe_char(char: str) -> bool:
     """Control, bidi or zero-width; tab and newline are fine."""
     if char in "\t\n":

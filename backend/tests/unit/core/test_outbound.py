@@ -84,3 +84,43 @@ def test_ordinary_angle_brackets_stay() -> None:
 def test_the_empty_string_and_plain_text_pass_through() -> None:
     assert neutralise("") == ""
     assert neutralise("Checkout crashes on Android 13") == "Checkout crashes on Android 13"
+
+
+# ---------------------------------------------------------------- outside text shown in chat
+
+
+def test_outside_text_shown_in_chat_cannot_mention_or_command() -> None:
+    from chirpo.core.outbound import ZWSP, shown
+
+    text = shown("@everyone see /unlink acme/api", 100)
+    assert text == f"@{ZWSP}everyone see /{ZWSP}unlink acme/api"
+
+
+def test_outside_text_loses_invisible_format_characters_but_keeps_emoji_joiners() -> None:
+    from chirpo.core.outbound import ZWSP, shown
+
+    assert shown("hi @⁠annie \U000e0041x", 100) == f"hi @{ZWSP}annie x"
+    family = "\U0001f468‍\U0001f469‍\U0001f467"
+    assert shown(f"team {family}", 100) == f"team {family}"
+
+
+def test_outside_text_is_one_line_and_cut() -> None:
+    from chirpo.core.outbound import shown
+
+    assert shown("a\n\nb   c", 100) == "a b c"
+    assert len(shown("x" * 300, 100)) == 100
+
+
+def test_clean_also_drops_format_characters_for_the_model() -> None:
+    from chirpo.core.context import clean
+
+    assert clean("check⁠out \U000e0041bug", 100) == "checkout bug"
+
+
+def test_a_quoted_or_bracketed_command_is_broken_but_links_stay_whole() -> None:
+    from chirpo.core.outbound import ZWSP, shown
+
+    assert shown('"/start" (/help)', 100) == f'"/{ZWSP}start" (/{ZWSP}help)'
+    assert shown("see https://example.com/a/b and acme/api", 100) == (
+        "see https://example.com/a/b and acme/api"
+    )

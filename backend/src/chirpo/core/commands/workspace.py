@@ -2,8 +2,10 @@
 
 from chirpo.core import messages
 from chirpo.core.commands.base import Actor, Request, allowed, audit, find_actor
+from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import AuditResult, RepoRef
 from chirpo.core.errors import LastAdminError
+from chirpo.core.outbound import shown
 from chirpo.core.permissions import Action, Role
 from chirpo.core.workspaces import PERSONALITIES, Member
 
@@ -143,8 +145,8 @@ async def members(request: Request) -> None:
 
 def _member_line(member: Member) -> str:
     return messages.MEMBER_LINE.format(
-        name=member.display_name,
-        chat=f" (@{member.chat_username})" if member.chat_username else "",
+        name=shown(member.display_name, MAX_NAME),
+        chat=f" ({shown('@' + member.chat_username, MAX_NAME)})" if member.chat_username else "",
         role=member.role,
         github=(
             messages.MEMBER_GITHUB.format(login=member.codehost.login)
@@ -167,7 +169,7 @@ async def role(request: Request) -> None:
     matches = await _find_members(actor, name)
     if len(matches) != 1:
         text = messages.MEMBER_AMBIGUOUS if matches else messages.MEMBER_NOT_FOUND
-        await request.reply(text.format(name=f"@{name}"))
+        await request.reply(text.format(name=shown(f"@{name}", MAX_NAME)))
         return
     (target,) = matches
     payload = {"member": str(target.id), "role": new_role.value}
@@ -178,7 +180,9 @@ async def role(request: Request) -> None:
         await request.reply(messages.LAST_ADMIN)
         return
     await audit(actor, Action.CHANGE_ROLE, AuditResult.EXECUTED, payload)
-    await request.reply(messages.ROLE_CHANGED.format(name=target.display_name, role=new_role))
+    await request.reply(
+        messages.ROLE_CHANGED.format(name=shown(target.display_name, MAX_NAME), role=new_role)
+    )
 
 
 def _role(text: str) -> Role | None:

@@ -4,8 +4,8 @@ from typing import Literal
 
 from chirpo.core import messages
 from chirpo.core.actions import ListIssues, MyIssues
-from chirpo.core.context import clean
 from chirpo.core.domain import Issue, IssueQuery, IssueState, Milestone
+from chirpo.core.outbound import shown
 from chirpo.core.ports import CodeHostAdapter
 from chirpo.core.resolution import Resolved
 
@@ -63,7 +63,7 @@ async def run_read(step: Resolved, codehost: CodeHostAdapter) -> str:
 
 
 def _item(issue: Issue, me: str | None) -> str:
-    title = clean(issue.title, MAX_TITLE)
+    title = shown(issue.title, MAX_TITLE)
     if me is None:
         people = messages.ISSUE_PEOPLE.format(people=", ".join(issue.assignees))
     else:
@@ -75,7 +75,7 @@ def _item(issue: Issue, me: str | None) -> str:
 
 
 def _milestone_filter(milestone: Milestone) -> str:
-    text = messages.DRY_FILTER_MILESTONE.format(title=clean(milestone.title, MAX_TITLE))
+    text = messages.DRY_FILTER_MILESTONE.format(title=shown(milestone.title, MAX_TITLE))
     if milestone.due_on:
         due = milestone.due_on
         text += messages.DRY_FILTER_DUE.format(day=due.day, month=messages.MONTHS[due.month - 1])

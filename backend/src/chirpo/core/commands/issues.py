@@ -6,7 +6,10 @@ from chirpo.core import messages
 from chirpo.core.commands.base import Request, allowed, audit, find_actor, limited
 from chirpo.core.domain import AuditResult, NewIssue
 from chirpo.core.errors import CodeHostError
+from chirpo.core.outbound import shown
 from chirpo.core.permissions import Action
+
+MAX_SHOWN_TITLE = 256  # GitHub's own limit
 
 
 async def issue(request: Request) -> None:
@@ -49,5 +52,7 @@ async def issue(request: Request) -> None:
         actor, Action.CREATE_ISSUE, AuditResult.EXECUTED, {**payload, "number": created.number}
     )
     await request.reply(
-        messages.ISSUE_CREATED.format(number=created.number, title=created.title, url=created.url)
+        messages.ISSUE_CREATED.format(
+            number=created.number, title=shown(created.title, MAX_SHOWN_TITLE), url=created.url
+        )
     )

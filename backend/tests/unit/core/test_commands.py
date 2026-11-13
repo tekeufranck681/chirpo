@@ -9,6 +9,7 @@ from chirpo.core import messages
 from chirpo.core.commands import Services
 from chirpo.core.domain import AuditResult, ChatUser, RepoPermission, RepoRef
 from chirpo.core.errors import CodeHostValidationError
+from chirpo.core.outbound import ZWSP
 from chirpo.core.permissions import PermissionChecker, Role
 from chirpo.core.pipeline import handle_inbound
 from chirpo.core.workspaces import CodeHostAccount, Member
@@ -244,8 +245,8 @@ async def test_members_lists_roles_and_github_accounts(world: World) -> None:
 
     assert reply.splitlines() == [
         messages.MEMBERS_TITLE,
-        "- Annie (@annie): admin, GitHub @annie-gh",
-        "- Franck (@franck_tg): member, GitHub not linked yet",
+        f"- Annie (@{ZWSP}annie): admin, GitHub annie-gh",  # nobody is pinged by the list
+        f"- Franck (@{ZWSP}franck_tg): member, GitHub not linked yet",
     ]
 
 
@@ -295,7 +296,7 @@ async def test_a_name_matching_several_people_is_refused(world: World) -> None:
 
     reply = await world.say("/role @tekeufranck681 admin")
 
-    assert reply == messages.MEMBER_AMBIGUOUS.format(name="@tekeufranck681")
+    assert reply == messages.MEMBER_AMBIGUOUS.format(name=f"@{ZWSP}tekeufranck681")
     admins = [m for m in await world.members.all(workspace.id) if m.role == Role.ADMIN]
     assert [m.display_name for m in admins] == ["Annie"]
 
@@ -324,7 +325,7 @@ async def test_issue_titles_are_one_line(world: World) -> None:
 async def test_unknown_people_are_explained(world: World) -> None:
     await linked_by_annie(world)
     assert await world.say("/role @nobody maintainer") == messages.MEMBER_NOT_FOUND.format(
-        name="@nobody"
+        name=f"@{ZWSP}nobody"
     )
 
 
@@ -517,3 +518,15 @@ async def test_personality_usage(world: World) -> None:
 
 async def test_help_mentions_personality() -> None:
     assert "/personality" in messages.HELP
+
+
+async def test_the_created_reply_cannot_mention_or_command(world: World) -> None:
+    await linked_by_annie(world)
+    reply = await world.say("/issue Ping @bob and /start it")
+    assert "@bob" not in reply and f"@{ZWSP}bob" in reply and f"/{ZWSP}start" in reply
+
+
+async def test_role_replies_cannot_mention(world: World) -> None:
+    await linked_by_annie(world)
+    reply = await world.say("/role @nobody_here admin")
+    assert "@nobody_here" not in reply and f"@{ZWSP}nobody_here" in reply

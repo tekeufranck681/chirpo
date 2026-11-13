@@ -143,7 +143,7 @@ NOT_LINKED_HERE = "{repo} isn't linked to this chat."
 
 MEMBERS_TITLE = "People here:"
 MEMBER_LINE = "- {name}{chat}: {role}, {github}"
-MEMBER_GITHUB = "GitHub @{login}"
+MEMBER_GITHUB = "GitHub {login}"  # no "@": Telegram would ping whoever has that username
 MEMBER_NOT_VERIFIED = "GitHub not linked yet"
 
 ROLE_USAGE = "Use: /role @name admin|maintainer|member"

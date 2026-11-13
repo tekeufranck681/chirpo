@@ -16,12 +16,13 @@ from uuid import UUID
 
 from chirpo.core import messages
 from chirpo.core.commands.base import Request, Services
-from chirpo.core.context import MAX_NAME, clean
+from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import AuditResult, Button, InboundCallback, RepoRef, SentMessage
 from chirpo.core.dryrun import MAX_TEXT, describe
 from chirpo.core.errors import MessagingError
 from chirpo.core.executor import Outcome, execute
 from chirpo.core.executor import undo as undo_effects
+from chirpo.core.outbound import shown
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
 from chirpo.core.ports import MessagingAdapter
@@ -50,7 +51,7 @@ async def propose(
     it changes is retired first: only one of the two can ever be confirmed. If the new card can't
     be posted, the old one is given back."""
     message = request.message
-    name = clean(asker.display_name, MAX_NAME)
+    name = shown(asker.display_name, MAX_NAME)
     footer = [messages.CONFIRM_FOOTER.format(name=name), *notes]
     if replaces is not None:
         footer.append(messages.REPLACES_NOTE)
@@ -193,7 +194,7 @@ async def handle_callback(
         await press.answer(messages.CB_UNAVAILABLE)
         return
     if not may_decide(presser, row):
-        name = clean(asker.display_name, MAX_NAME)
+        name = shown(asker.display_name, MAX_NAME)
         await press.answer(messages.CB_NOT_ALLOWED.format(name=name))
         return
     card = SentMessage(chat=event.chat, message_id=event.message_id)  # checked: it is the row's
@@ -248,7 +249,7 @@ class _Handling:
             await self._lost()
             return
         await self.press.answer(messages.CB_CANCELLED)
-        name = clean(self.presser.display_name, MAX_NAME)
+        name = shown(self.presser.display_name, MAX_NAME)
         await self.press.show(self.card, messages.CANCELLED.format(name=name))
         await self._audit(AuditResult.REJECTED)
 
