@@ -41,6 +41,7 @@ class Action(StrEnum):
     CHANGE_ROLE = "change_role"
     LIST_MEMBERS = "list_members"
     CHANGE_SETTINGS = "change_settings"
+    EDIT_LABELS = "edit_labels"  # rename a repo's labels, with the status labels (M6.4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,7 @@ REQUIREMENTS: Mapping[Action, Requirement] = {
     Action.CHANGE_ROLE: Requirement(Role.ADMIN, None),
     Action.LIST_MEMBERS: Requirement(Role.MEMBER, None),
     Action.CHANGE_SETTINGS: Requirement(Role.ADMIN, None),
+    Action.EDIT_LABELS: Requirement(Role.ADMIN, RepoPermission.WRITE),
 }
 
 

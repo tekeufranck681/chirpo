@@ -4,6 +4,7 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote
 
 from githubkit import GitHub, Response
 from githubkit.utils import UNSET
@@ -276,6 +277,16 @@ class GitHubAdapter:
             except CodeHostValidationError:
                 if label.name.casefold() not in await self._label_names(repo):
                     raise  # a real validation error, not "created meanwhile by someone else"
+
+    async def rename_label(self, repo: RepoRef, old: str, new: str) -> None:
+        await self._call(
+            repo,
+            f"rename label {old!r} in {repo.full_name}",
+            # githubkit puts the name into the path as it is: "p1?x" would rename the label "p1".
+            lambda gh: gh.rest.issues.async_update_label(
+                repo.owner, repo.name, quote(old, safe=""), new_name=new
+            ),
+        )
 
     async def _label_names(self, repo: RepoRef) -> set[str]:
         return {name.casefold() for name in await self.list_labels(repo)}

@@ -66,6 +66,7 @@ async def interpret(
     fetch: Fetch,
     charge: Charge | None = None,
     personality: Personality = DEFAULT_PERSONALITY,
+    issue_language: str | None = None,
 ) -> Asked:
     """The tool is offered only when `candidate` exists, and only once: the second call can't ask
     again. Whatever else came with a request to look is ignored; the second answer decides.
@@ -81,6 +82,7 @@ async def interpret(
             look=candidate is not None,
             marker=marker,
             personality=personality,
+            issue_language=issue_language,
         )
     )
     if charge is not None:
@@ -98,6 +100,7 @@ async def interpret(
             images=[*images, *seen.images],
             marker=marker,
             personality=personality,
+            issue_language=issue_language,
         )
     )
     if charge is not None:

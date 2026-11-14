@@ -40,12 +40,14 @@ from chirpo.core.errors import (
     CodeHostConflictError,
     CodeHostForbiddenError,
     CodeHostNotFoundError,
+    CodeHostValidationError,
     LastAdminError,
     MessagingForbiddenError,
 )
 from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import (
     AuditEntry,
     CodeHostAccount,
@@ -528,6 +530,21 @@ class FakeCodeHost:
     async def ensure_labels(self, repo: RepoRef, labels: Sequence[LabelSpec]) -> None:
         self.labels.setdefault(repo.key, set()).update(label.name for label in labels)
 
+    async def rename_label(self, repo: RepoRef, old: str, new: str) -> None:
+        """Like GitHub: the label itself is renamed, so every issue shows the new name."""
+        names = self.labels.setdefault(repo.key, set())
+        found = next((name for name in names if name.casefold() == old.casefold()), None)
+        if found is None:
+            raise CodeHostNotFoundError(f"no label {old}")
+        if any(n.casefold() == new.casefold() and n != found for n in names):
+            raise CodeHostValidationError(f"label {new} already exists")
+        names.discard(found)
+        names.add(new)
+        for key, issue in list(self.issues.items()):
+            if key[0] == repo.key and found in issue.labels:
+                labels = tuple(new if label == found else label for label in issue.labels)
+                self.issues[key] = issue.model_copy(update={"labels": labels})
+
     async def user_exists(self, repo: RepoRef, username: str) -> bool:
         return any(same_login(username, user) for user in self.users)
 
@@ -635,14 +652,30 @@ class FakeWorkspaces:
         return False
 
     async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None:
-        for key, workspace in self.by_chat.items():
-            if workspace.id == workspace_id:
-                self.by_chat[key] = workspace.model_copy(update={"keeps_context": keep})
+        self._update(workspace_id, keeps_context=keep)
 
     async def set_personality(self, workspace_id: UUID, personality: Personality) -> None:
+        self._update(workspace_id, personality=personality)
+
+    async def set_default_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
+        links = self.links.get(workspace_id, [])
+        if not any(link.repo.key == repo.key for link in links):
+            return False
+        self.links[workspace_id] = [
+            link.model_copy(update={"is_default": link.repo.key == repo.key}) for link in links
+        ]
+        return True
+
+    async def set_status_labels(self, workspace_id: UUID, labels: StatusLabels) -> None:
+        self._update(workspace_id, statuses=labels)
+
+    async def set_issue_language(self, workspace_id: UUID, code: str | None) -> None:
+        self._update(workspace_id, issue_language=code)
+
+    def _update(self, workspace_id: UUID, **changes: object) -> None:
         for key, workspace in self.by_chat.items():
             if workspace.id == workspace_id:
-                self.by_chat[key] = workspace.model_copy(update={"personality": personality})
+                self.by_chat[key] = workspace.model_copy(update=changes)
 
 
 class FakeMembers:

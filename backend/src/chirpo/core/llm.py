@@ -14,6 +14,7 @@ from functools import cache
 from importlib.resources import files
 
 from chirpo.core.actions import ACTIONS, ActionSpec, Proposal, unsafe_char
+from chirpo.core.languages import LANGUAGES
 from chirpo.core.permissions import Action
 from chirpo.core.tools import ToolSpec, tool_specs
 from chirpo.core.workspaces import DEFAULT_PERSONALITY, Personality
@@ -54,13 +55,21 @@ class Interpretation:
 
 SMALL_TALK = "small_talk"
 # prompts/<name>.md, in the order they are inserted
-SECTIONS = ("images", "proposal", "smalltalk", "playful")
+SECTIONS = ("images", "proposal", "smalltalk", "playful", "language")
 _MEDIA_BLOCKS = frozenset({"recent_messages", "replied_message"})
 _MEDIA_MARKERS = ("[image", "[file]", "[voice message]")  # written by us, see core/context.py
 
 
 @cache
-def system_prompt(sections: frozenset[str] = frozenset()) -> str:
+def system_prompt(sections: frozenset[str] = frozenset(), language: str | None = None) -> str:
+    """`language`: the workspace's issue language, a name from core/languages.py (never typed
+    text: it goes into the instructions)."""
+    if language is not None:
+        if language not in LANGUAGES.values():
+            raise ValueError("not a known language")
+        sections |= {"language"}
+    elif "language" in sections:
+        raise ValueError("the language section needs a language")
     unknown = sections - set(SECTIONS)
     if unknown:
         raise ValueError(f"no such prompt section: {sorted(unknown)}")
@@ -77,6 +86,7 @@ def system_prompt(sections: frozenset[str] = frozenset()) -> str:
         if spec.name != SMALL_TALK or "smalltalk" in sections  # not offered when personality is off
     )
     text = template.replace("{actions}", tools).replace("{sections}", extra)
+    text = text.replace("{language}", language or "")
     return re.sub(r"\n{3,}", "\n\n", text).strip()  # no gap where a section was left out
 
 
@@ -115,11 +125,14 @@ def interpret_request(
     look: bool = False,
     marker: str | None = None,
     personality: Personality = DEFAULT_PERSONALITY,
+    issue_language: str | None = None,
 ) -> InterpretRequest:
     """`context`: (kind, body) blocks from `core.context`, each wrapped like the message.
     `look`: offer the tool that asks to see the most recent image (D52).
-    `personality`: the workspace's tone; `off` doesn't offer `small_talk` at all (M6.11)."""
+    `personality`: the workspace's tone; `off` doesn't offer `small_talk` at all (M6.11).
+    `issue_language`: a code from core/languages.py; GitHub text is written in it (M6.4)."""
     marker = marker or secrets.token_hex(8)
+    language = LANGUAGES[issue_language] if issue_language else None
     left_out = {
         name
         for name, offered in ((LOOK_TOOL, look), (SMALL_TALK, personality != "off"))
@@ -130,7 +143,7 @@ def interpret_request(
     blocks.append(_untrusted("chat_message", body, marker))
     return InterpretRequest(
         instructions=(
-            f"{system_prompt(_sections_for(context, images, look, personality))}"
+            f"{system_prompt(_sections_for(context, images, look, personality), language)}"
             f"\n\nThis request's marker is `{marker}`."
         ),
         message="\n\n".join(blocks),

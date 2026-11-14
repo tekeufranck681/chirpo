@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from chirpo.core.commands import basic, issues, workspace
+from chirpo.core.commands import basic, issues, settings, workspace
 from chirpo.core.commands.base import Handler, Request, Services
 
 COMMANDS: Mapping[str, Handler] = MappingProxyType(
@@ -21,6 +21,7 @@ COMMANDS: Mapping[str, Handler] = MappingProxyType(
         "issue": issues.issue,
         "context": workspace.context,
         "personality": workspace.personality,
+        "settings": settings.settings,
     }
 )
 

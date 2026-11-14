@@ -35,6 +35,7 @@ from chirpo.core.executor import Outcome, execute, undo
 from chirpo.core.pending import Step
 from chirpo.core.permissions import PermissionChecker, Role
 from chirpo.core.ratelimit import Limits, RateLimiter
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import CodeHostAccount, Member
 from tests.fakes import (
     CHAT,
@@ -104,6 +105,7 @@ class Setup:
             requester=self.franck,
             confirmer=confirmer,
             services=self.services,
+            statuses=StatusLabels(),
         )
 
     async def run(self, *proposals: Proposal) -> "tuple[list[str], str | None]":
@@ -112,6 +114,7 @@ class Setup:
             requester=self.franck,
             confirmer=self.annie,
             services=self.services,
+            statuses=StatusLabels(),
         )
         return outcome.done, outcome.problem
 
@@ -297,7 +300,13 @@ async def test_a_stored_step_that_no_longer_validates_stops_the_run() -> None:
     broken = Step(
         action="close_issue", provider="github", proposal={"repo": REPO_NAME, "issue": {}}
     )
-    outcome = await execute([broken], requester=s.franck, confirmer=s.annie, services=s.services)
+    outcome = await execute(
+        [broken],
+        requester=s.franck,
+        confirmer=s.annie,
+        services=s.services,
+        statuses=StatusLabels(),
+    )
     assert outcome.done == []
     assert outcome.problem == messages.STEP_BROKEN
 
@@ -344,6 +353,7 @@ async def test_a_status_step_records_what_it_added_and_removed() -> None:
             "number": number,
             "added": ["status: review"],
             "removed": ["status: todo"],
+            "statuses": ["status: todo", "status: in progress", "status: review", "status: done"],
         }
     ]
 
@@ -471,6 +481,20 @@ async def test_undo_does_not_bring_back_a_status_somebody_replaced_since() -> No
     assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "status: done"}
 
 
+async def test_an_effect_stored_before_status_labels_were_recorded_still_undoes() -> None:
+    s = await setup()
+    number = await s.issue(labels=("bug", "status: done"))
+    legacy = {
+        "provider": "github",
+        "repo": REPO_NAME,
+        "number": number,
+        "added": ["status: review"],
+        "removed": ["status: todo"],
+    }  # no "statuses": the `status: ` labels count, and one is there now
+    await undo([legacy], requester=s.franck, confirmer=s.franck, services=s.services)
+    assert set(s.codehost.issues[(REPO.key, number)].labels) == {"bug", "status: done"}
+
+
 async def test_audit_entries_say_which_stored_proposal_they_belong_to() -> None:
     from uuid import uuid4
 
@@ -482,6 +506,7 @@ async def test_audit_entries_say_which_stored_proposal_they_belong_to() -> None:
         requester=s.franck,
         confirmer=None,
         services=s.services,
+        statuses=StatusLabels(),
         pending_id=pending_id,
     )
     await undo(

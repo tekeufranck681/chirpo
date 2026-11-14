@@ -639,3 +639,41 @@ async def test_issues_are_listed_by_milestone_and_carry_theirs(
 
     assert params(route)["milestone"] == "2"
     assert issues[0].milestone == 2
+
+
+async def test_rename_label_renames_the_label_itself(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    route = github.patch(f"{LABELS}/status:%20in%20progress").respond(
+        200, json=payload("label_created")
+    )
+    await adapter.rename_label(REPO, "status: in progress", "WIP")
+    assert sent(route) == {"new_name": "WIP"}
+
+
+async def test_renaming_onto_an_existing_label_is_a_validation_error(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.patch(f"{LABELS}/WIP").respond(
+        422, json={"message": "Validation Failed", "errors": [{"code": "already_exists"}]}
+    )
+    with pytest.raises(CodeHostValidationError):
+        await adapter.rename_label(REPO, "WIP", "Doing")
+
+
+@pytest.mark.parametrize(
+    ("label", "path"),
+    [
+        ("p1?x", "p1%3Fx"),
+        ("a#b", "a%23b"),
+        ("team/review", "team%2Freview"),
+        ("50%", "50%25"),
+        ("status: done", "status%3A%20done"),
+    ],
+)
+async def test_rename_label_puts_the_whole_name_in_the_path(
+    adapter: GitHubAdapter, github: respx.MockRouter, label: str, path: str
+) -> None:
+    route = github.patch(url__regex=r".*/labels/.*").respond(200, json=payload("label_created"))
+    await adapter.rename_label(REPO, label, "New")
+    assert route.calls.last.request.url.raw_path.decode().endswith(f"/labels/{path}")

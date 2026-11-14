@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, bindparam, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chirpo.core.domain import (
@@ -20,9 +20,11 @@ from chirpo.core.domain import (
     RepoRef,
 )
 from chirpo.core.errors import LastAdminError
+from chirpo.core.languages import LANGUAGES
 from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
+from chirpo.core.statuses import STATUSES, StatusLabels, label_problem
 from chirpo.core.workspaces import (
     DEFAULT_PERSONALITY,
     PERSONALITIES,
@@ -67,8 +69,11 @@ class SqlProcessedEvents:
             return int(result.rowcount)  # type: ignore[attr-defined]
 
 
-KEEP_CONTEXT = "keep_context"  # key in workspaces.settings
-PERSONALITY = "personality"  # key in workspaces.settings
+# Keys in workspaces.settings
+KEEP_CONTEXT = "keep_context"
+PERSONALITY = "personality"
+STATUS_LABELS = "status_labels"
+ISSUE_LANGUAGE = "issue_language"
 
 
 MAX_KEPT_ATTACHMENTS = 10
@@ -241,13 +246,29 @@ def _winner[T](found: T | None) -> T:
 
 
 def _to_workspace(row: db.Workspace) -> Workspace:
+    """Settings are read defensively: a value that isn't valid any more falls back to the
+    default rather than break every request of the workspace."""
     stored = row.settings.get(PERSONALITY)
+    language = row.settings.get(ISSUE_LANGUAGE)
     return Workspace(
         id=row.id,
         name=row.name,
         keeps_context=row.settings.get(KEEP_CONTEXT, True) is not False,
         personality=stored if stored in PERSONALITIES else DEFAULT_PERSONALITY,
+        statuses=_status_labels(row.settings.get(STATUS_LABELS)),
+        issue_language=language if language in LANGUAGES else None,
     )
+
+
+def _status_labels(stored: object) -> StatusLabels:
+    labels = StatusLabels()
+    if not isinstance(stored, dict):
+        return labels
+    for status in STATUSES:
+        name = stored.get(status)
+        if isinstance(name, str) and label_problem(name, labels, status) is None:
+            labels = labels.with_label(status, name)
+    return labels
 
 
 def _to_linked_repo(row: db.RepoConnection) -> LinkedRepo:
@@ -396,28 +417,51 @@ class SqlWorkspaces:
             return True
 
     async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None:
+        await self._merge_settings(workspace_id, {KEEP_CONTEXT: keep})
+
+    async def set_personality(self, workspace_id: UUID, personality: Personality) -> None:
+        await self._merge_settings(workspace_id, {PERSONALITY: personality})
+
+    async def set_status_labels(self, workspace_id: UUID, labels: StatusLabels) -> None:
+        stored = {status: labels.label(status) for status in STATUSES}
+        await self._merge_settings(workspace_id, {STATUS_LABELS: stored})
+
+    async def set_issue_language(self, workspace_id: UUID, code: str | None) -> None:
+        await self._merge_settings(workspace_id, {ISSUE_LANGUAGE: code})
+
+    async def _merge_settings(self, workspace_id: UUID, values: dict[str, Any]) -> None:
+        """Replaces only these top-level keys, in one statement: two admins changing different
+        settings at the same moment both keep their change. The four status labels are one key,
+        so two renames at the same instant keep the last (and a duplicate is dropped on read)."""
         statement = (
             update(db.Workspace)
             .where(db.Workspace.id == workspace_id)
-            .values(
-                settings=db.Workspace.settings.op("||")(func.jsonb_build_object(KEEP_CONTEXT, keep))
-            )
+            .values(settings=db.Workspace.settings.op("||")(bindparam("values", values, JSONB)))
         )
         async with self._sessions.begin() as session:
             await session.execute(statement)
 
-    async def set_personality(self, workspace_id: UUID, personality: Personality) -> None:
-        statement = (
-            update(db.Workspace)
-            .where(db.Workspace.id == workspace_id)
-            .values(
-                settings=db.Workspace.settings.op("||")(
-                    func.jsonb_build_object(PERSONALITY, personality)
-                )
-            )
-        )
+    async def set_default_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
         async with self._sessions.begin() as session:
-            await session.execute(statement)
+            await _lock_workspace(session, workspace_id)
+            in_workspace = db.RepoConnection.workspace_id == workspace_id
+            row = await session.scalar(
+                select(db.RepoConnection).where(in_workspace, *_same_repo(repo))
+            )
+            if row is None:
+                return False
+            # The old default goes first: one default per workspace is a unique index.
+            await session.execute(
+                update(db.RepoConnection)
+                .where(in_workspace, db.RepoConnection.id != row.id, db.RepoConnection.is_default)
+                .values(is_default=False)
+            )
+            await session.execute(
+                update(db.RepoConnection)
+                .where(db.RepoConnection.id == row.id)
+                .values(is_default=True)
+            )
+            return True
 
 
 class SqlMembers:

@@ -31,6 +31,7 @@ from chirpo.core.domain import (
 from chirpo.core.llm import Interpretation, InterpretRequest
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import (
     AuditEntry,
     CodeHostAccount,
@@ -150,6 +151,10 @@ class CodeHostAdapter(Protocol):
         """The repo's label names, spelled as on the code host."""
         ...
 
+    async def rename_label(self, repo: RepoRef, old: str, new: str) -> None:
+        """Renames the label itself, so every issue that has it shows the new name."""
+        ...
+
     async def list_milestones(self, repo: RepoRef) -> list[Milestone]:
         """The repo's open milestones, the soonest due first and those without a date last."""
         ...
@@ -211,6 +216,16 @@ class Workspaces(Protocol):
     async def set_keeps_context(self, workspace_id: UUID, *, keep: bool) -> None: ...
 
     async def set_personality(self, workspace_id: UUID, personality: Personality) -> None: ...
+
+    async def set_default_repo(self, workspace_id: UUID, repo: RepoRef) -> bool:
+        """False if the repo isn't linked to the workspace."""
+        ...
+
+    async def set_status_labels(self, workspace_id: UUID, labels: StatusLabels) -> None: ...
+
+    async def set_issue_language(self, workspace_id: UUID, code: str | None) -> None:
+        """`code` from core/languages.py; None: issues follow the message's language."""
+        ...
 
 
 class Members(Protocol):
