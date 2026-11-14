@@ -1,7 +1,7 @@
 """Protocols implemented outside the core: messaging, code host, LLM, repositories."""
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -38,6 +38,8 @@ from chirpo.core.workspaces import (
     LinkedRepo,
     Member,
     Personality,
+    ScheduledSummary,
+    SummarySchedule,
     Workspace,
 )
 
@@ -225,6 +227,28 @@ class Workspaces(Protocol):
 
     async def set_issue_language(self, workspace_id: UUID, code: str | None) -> None:
         """`code` from core/languages.py; None: issues follow the message's language."""
+        ...
+
+    async def set_timezone(self, workspace_id: UUID, name: str) -> None: ...
+
+    async def summary_schedule(self, chat: ChatRef) -> SummarySchedule | None: ...
+
+    async def set_summary_schedule(self, chat: ChatRef, schedule: SummarySchedule | None) -> None:
+        """None turns the chat's daily summary off."""
+        ...
+
+    async def scheduled_summaries(self) -> list[ScheduledSummary]:
+        """Every chat, in every workspace, that has a daily summary: for the scheduler only."""
+        ...
+
+    async def claim_summary(self, chat: ChatRef, day: date) -> bool:
+        """Marks the chat's summary for `day` as sent; False if it already was (another worker,
+        a retry), so a summary is never posted twice."""
+        ...
+
+    async def release_summary(self, chat: ChatRef, day: date, previous: date | None) -> None:
+        """Gives back a claim whose posting failed: `day` becomes `previous` again, so the next
+        run tries again. Nothing changes if the chat's day isn't `day` any more."""
         ...
 
 

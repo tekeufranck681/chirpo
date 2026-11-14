@@ -209,6 +209,7 @@ class Issue(BaseModel):
     created_at: AwareDatetime
     updated_at: AwareDatetime
     milestone: int | None = None  # its number on the code host
+    closed_at: AwareDatetime | None = None
 
 
 class Milestone(BaseModel):
@@ -259,6 +260,7 @@ class IssueQuery(BaseModel):
     assignee: str | None = None
     labels: tuple[str, ...] = ()
     milestone: int | None = None
+    since: AwareDatetime | None = None  # only issues updated at or after this time
     limit: int = Field(default=30, ge=1, le=100)
 
     @field_validator("labels")

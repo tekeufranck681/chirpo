@@ -19,6 +19,7 @@ from chirpo.core.permissions import PermissionChecker
 from chirpo.core.pipeline import process
 from chirpo.core.ports import MessagingAdapter
 from chirpo.core.ratelimit import Limits, RateLimiter
+from chirpo.core.summary import send_due
 from chirpo.core.sweep import sweep
 from chirpo.db.repositories import (
     SqlAuditLog,
@@ -101,6 +102,18 @@ async def expire_pending(ctx: dict[str, Any]) -> int:
         return 0
     swept = await sweep(services.pending, ctx["messaging"], datetime.now(UTC))
     return swept.expired + swept.failed + swept.purged
+
+
+@counted_job
+async def send_summaries(ctx: dict[str, Any]) -> int:
+    """Posts the daily summaries that are due (M6.5)."""
+    services = ctx.get("services")
+    if services is None:  # GitHub isn't configured: nothing to summarise
+        return 0
+    posted = await send_due(services, ctx["messaging"], datetime.now(UTC))
+    if posted:
+        log.info("summaries_posted", count=posted)
+    return posted
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -223,6 +236,7 @@ class WorkerSettings:
         cron(prune_processed_events, hour=3, minute=17),
         cron(prune_message_buffer, minute=7),  # hourly
         cron(expire_pending, minute=set(range(0, 60, 5))),
+        cron(send_summaries, second=5),  # every minute: summaries go out at the chosen minute
     ]
     on_startup = startup
     on_shutdown = shutdown

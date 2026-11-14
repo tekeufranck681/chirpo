@@ -1,11 +1,12 @@
 """Workspaces: a team with its chats, repos and members, their accounts, and the audit log."""
 
+from datetime import date, time
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from chirpo.core.domain import AuditResult, RepoRef
+from chirpo.core.domain import AuditResult, ChatRef, RepoRef
 from chirpo.core.permissions import Role
 from chirpo.core.statuses import StatusLabels
 
@@ -24,6 +25,27 @@ class Workspace(BaseModel):
     personality: Personality = DEFAULT_PERSONALITY  # admins change it with /personality
     statuses: StatusLabels = StatusLabels()  # the team's status labels (/settings status)
     issue_language: str | None = None  # a code from core/languages.py; None: the message's own
+    timezone: str = "UTC"  # an IANA name checked by core/summary.timezone_named (M6.5)
+
+
+class SummarySchedule(BaseModel):
+    """When a chat gets its daily summary (M6.5), in the workspace's timezone."""
+
+    model_config = ConfigDict(frozen=True)
+
+    at: time
+    weekdays_only: bool = False
+
+
+class ScheduledSummary(BaseModel):
+    """A chat that has a daily summary, with what deciding and writing it needs."""
+
+    model_config = ConfigDict(frozen=True)
+
+    chat: ChatRef
+    workspace: Workspace
+    schedule: SummarySchedule
+    sent_on: date | None = None  # the team's local day it was last posted
 
 
 class LinkedRepo(BaseModel):

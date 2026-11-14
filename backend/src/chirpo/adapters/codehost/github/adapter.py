@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
@@ -90,7 +90,13 @@ def _to_issue(repo: RepoRef, found: GitHubIssue | GitHubUpdatedIssue) -> Issue:
         created_at=found.created_at,
         updated_at=found.updated_at,
         milestone=found.milestone.number if found.milestone else None,
+        closed_at=found.closed_at,
     )
+
+
+def _iso(moment: datetime) -> Any:
+    """GitHub's documented form, 2026-11-07T09:00:00Z; githubkit would send str(datetime)."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _to_pull_request(repo: RepoRef, node: dict[str, Any]) -> PullRequest:
@@ -233,6 +239,7 @@ class GitHubAdapter:
                     assignee=query.assignee or UNSET,
                     labels=",".join(query.labels) or UNSET,
                     milestone=str(query.milestone) if query.milestone else UNSET,
+                    since=_iso(query.since) if query.since else UNSET,
                     per_page=PAGE_SIZE,
                     page=page,
                 )
