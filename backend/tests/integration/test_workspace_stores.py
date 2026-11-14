@@ -396,3 +396,61 @@ async def test_status_labels_and_issue_language_survive_a_reload(stores: Stores)
     found = await stores.workspaces.for_chat(chat)
     assert found is not None
     assert (found.statuses, found.issue_language) == (StatusLabels(), None)
+
+
+async def test_a_chat_summary_schedule_is_kept_and_claimed_once_a_day(stores: Stores) -> None:
+    from datetime import date, time
+
+    from chirpo.core.workspaces import SummarySchedule
+
+    chat = new_chat()
+    workspace = await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    assert await stores.workspaces.summary_schedule(chat) is None
+    schedule = SummarySchedule(at=time(9, 30), weekdays_only=True)
+    await stores.workspaces.set_summary_schedule(chat, schedule)
+    assert await stores.workspaces.summary_schedule(chat) == schedule
+    [found] = [s for s in await stores.workspaces.scheduled_summaries() if s.chat == chat]
+    assert (found.workspace.id, found.schedule, found.sent_on) == (workspace.id, schedule, None)
+
+    friday = date(2026, 11, 13)
+    first, second = await asyncio.gather(
+        stores.workspaces.claim_summary(chat, friday),
+        stores.workspaces.claim_summary(chat, friday),
+    )
+    assert sorted([first, second]) == [False, True]
+    [found] = [s for s in await stores.workspaces.scheduled_summaries() if s.chat == chat]
+    assert found.sent_on == friday
+    assert await stores.workspaces.claim_summary(chat, date(2026, 11, 14))
+
+    await stores.workspaces.set_summary_schedule(chat, None)
+    assert await stores.workspaces.summary_schedule(chat) is None
+    assert not [s for s in await stores.workspaces.scheduled_summaries() if s.chat == chat]
+
+
+async def test_the_timezone_defaults_to_utc_and_survives_a_reload(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    assert workspace.timezone == "UTC"
+    await stores.workspaces.set_timezone(workspace.id, "Africa/Douala")
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None and found.timezone == "Africa/Douala"
+
+
+async def test_a_released_claim_can_be_claimed_again(stores: Stores) -> None:
+    from datetime import date, time
+
+    from chirpo.core.workspaces import SummarySchedule
+
+    chat = new_chat()
+    await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    await stores.workspaces.set_summary_schedule(chat, SummarySchedule(at=time(9, 0)))
+    thursday, friday = date(2026, 11, 12), date(2026, 11, 13)
+    assert await stores.workspaces.claim_summary(chat, thursday)
+    assert await stores.workspaces.claim_summary(chat, friday)
+    await stores.workspaces.release_summary(chat, friday, thursday)
+    [found] = [s for s in await stores.workspaces.scheduled_summaries() if s.chat == chat]
+    assert found.sent_on == thursday
+    assert await stores.workspaces.claim_summary(chat, friday)
+    await stores.workspaces.release_summary(chat, thursday, None)  # not its day now: no change
+    [found] = [s for s in await stores.workspaces.scheduled_summaries() if s.chat == chat]
+    assert found.sent_on == friday

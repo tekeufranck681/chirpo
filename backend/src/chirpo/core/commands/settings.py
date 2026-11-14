@@ -1,4 +1,5 @@
-"""/settings (M6.4): the default repo, the team's status labels and the issue language.
+"""/settings (M6.4, M6.5): the default repo, the team's status labels, the issue language, the
+chat's daily summary and the workspace's timezone.
 
 Anyone can see them; admins change them, one at a time, and each change is audited. The values
 are checked here, before anything is stored: a label name or a language can't smuggle in text.
@@ -15,11 +16,19 @@ from chirpo.core.languages import LANGUAGES, language_code
 from chirpo.core.outbound import shown
 from chirpo.core.permissions import Action
 from chirpo.core.statuses import STATUSES, StatusLabels, label_problem, status_named
+from chirpo.core.summary import parse_time, timezone_named
+from chirpo.core.workspaces import SummarySchedule
 
 
 async def settings(request: Request) -> None:
     key, rest = (*request.args.split(maxsplit=1), "", "")[:2]
-    change = {"repo": _repo, "status": _status, "language": _language}.get(key.lower())
+    change = {
+        "repo": _repo,
+        "status": _status,
+        "language": _language,
+        "summary": _summary,
+        "timezone": _timezone,
+    }.get(key.lower())
     if key and change is None:
         await request.reply(messages.SETTINGS_USAGE)
         return
@@ -27,15 +36,16 @@ async def settings(request: Request) -> None:
     if actor is None:
         return
     if change is None:
-        await request.reply(await _overview(actor))
+        await request.reply(await _overview(request, actor))
         return
     if not await allowed(request, actor, Action.CHANGE_SETTINGS):
         return
     await change(request, actor, rest.strip())
 
 
-async def _overview(actor: Actor) -> str:
+async def _overview(request: Request, actor: Actor) -> str:
     services, workspace = actor.services, actor.workspace
+    schedule = await services.workspaces.summary_schedule(request.message.chat)
     links = await services.workspaces.repos(workspace.id)
     labels = workspace.statuses
     statuses = ", ".join(
@@ -52,6 +62,8 @@ async def _overview(actor: Actor) -> str:
         language=LANGUAGES.get(workspace.issue_language or "", messages.SETTINGS_LANGUAGE_MESSAGE),
         personality=workspace.personality,
         context=context,
+        summary=_schedule_text(schedule) if schedule else messages.SUMMARY_IS_OFF,
+        timezone=workspace.timezone,
     )
 
 
@@ -200,6 +212,53 @@ async def _language(request: Request, actor: Actor, said: str) -> None:
         await request.reply(messages.LANGUAGE_OFF)
     else:
         await request.reply(messages.LANGUAGE_SET.format(language=LANGUAGES[code]))
+
+
+async def _summary(request: Request, actor: Actor, said: str) -> None:
+    chat = request.message.chat
+    words = said.lower().split()
+    was = await actor.services.workspaces.summary_schedule(chat)
+    if words == ["off"]:
+        await actor.services.workspaces.set_summary_schedule(chat, None)
+        await _done(actor, {"summary": "off", "was": _audited(was)})
+        await request.reply(messages.SUMMARY_OFF)
+        return
+    at = parse_time(words[0]) if words else None
+    if at is None or words[1:] not in ([], ["weekdays"]):
+        await request.reply(messages.SUMMARY_USAGE)
+        return
+    schedule = SummarySchedule(at=at, weekdays_only=words[1:] == ["weekdays"])
+    await actor.services.workspaces.set_summary_schedule(chat, schedule)
+    await _done(actor, {"summary": _audited(schedule), "was": _audited(was)})
+    await request.reply(
+        messages.SUMMARY_SET.format(
+            at=at.strftime("%H:%M"), days=_days(schedule), timezone=actor.workspace.timezone
+        )
+    )
+
+
+async def _timezone(request: Request, actor: Actor, said: str) -> None:
+    name = timezone_named(said)
+    if name is None:
+        await request.reply(messages.TIMEZONE_UNKNOWN)
+        return
+    await actor.services.workspaces.set_timezone(actor.workspace.id, name)
+    await _done(actor, {"timezone": name, "was": actor.workspace.timezone})
+    await request.reply(messages.TIMEZONE_SET.format(timezone=name))
+
+
+def _schedule_text(schedule: SummarySchedule) -> str:
+    return messages.SUMMARY_AT.format(at=schedule.at.strftime("%H:%M"), days=_days(schedule))
+
+
+def _days(schedule: SummarySchedule) -> str:
+    return messages.SUMMARY_WEEKDAYS if schedule.weekdays_only else ""
+
+
+def _audited(schedule: SummarySchedule | None) -> str | None:
+    if schedule is None:
+        return None
+    return schedule.at.strftime("%H:%M") + (" weekdays" if schedule.weekdays_only else "")
 
 
 def _labels(labels: StatusLabels) -> dict[str, str]:

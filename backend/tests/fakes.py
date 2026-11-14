@@ -54,6 +54,8 @@ from chirpo.core.workspaces import (
     LinkedRepo,
     Member,
     Personality,
+    ScheduledSummary,
+    SummarySchedule,
     Workspace,
 )
 
@@ -512,6 +514,7 @@ class FakeCodeHost:
             )
             and set(query.labels) <= set(issue.labels)
             and (query.milestone is None or issue.milestone == query.milestone)
+            and (query.since is None or issue.updated_at >= query.since)
         ]
         return found[: query.limit]
 
@@ -605,6 +608,8 @@ class FakeWorkspaces:
         self.by_chat: dict[tuple[str, str], Workspace] = {}
         self.links: dict[UUID, list[LinkedRepo]] = {}
         self.members = members  # to promote the first linker, like the SQL transaction does
+        # (platform, chat id) -> (schedule, the local day last sent)
+        self.summaries: dict[tuple[str, str], tuple[SummarySchedule, date | None]] = {}
 
     async def for_chat(self, chat: ChatRef) -> Workspace | None:
         return self.by_chat.get((chat.platform, chat.chat_id))
@@ -671,6 +676,46 @@ class FakeWorkspaces:
 
     async def set_issue_language(self, workspace_id: UUID, code: str | None) -> None:
         self._update(workspace_id, issue_language=code)
+
+    async def set_timezone(self, workspace_id: UUID, name: str) -> None:
+        self._update(workspace_id, timezone=name)
+
+    async def summary_schedule(self, chat: ChatRef) -> SummarySchedule | None:
+        found = self.summaries.get((chat.platform, chat.chat_id))
+        return found[0] if found else None
+
+    async def set_summary_schedule(self, chat: ChatRef, schedule: SummarySchedule | None) -> None:
+        key = (chat.platform, chat.chat_id)
+        if schedule is None:
+            self.summaries.pop(key, None)
+        else:
+            self.summaries[key] = (schedule, self.summaries.get(key, (schedule, None))[1])
+
+    async def scheduled_summaries(self) -> list[ScheduledSummary]:
+        return [
+            ScheduledSummary(
+                chat=ChatRef(platform=platform, chat_id=chat_id),
+                workspace=self.by_chat[(platform, chat_id)],
+                schedule=schedule,
+                sent_on=sent_on,
+            )
+            for (platform, chat_id), (schedule, sent_on) in self.summaries.items()
+            if (platform, chat_id) in self.by_chat
+        ]
+
+    async def claim_summary(self, chat: ChatRef, day: date) -> bool:
+        key = (chat.platform, chat.chat_id)
+        schedule, sent_on = self.summaries[key]
+        if sent_on == day:
+            return False
+        self.summaries[key] = (schedule, day)
+        return True
+
+    async def release_summary(self, chat: ChatRef, day: date, previous: date | None) -> None:
+        key = (chat.platform, chat.chat_id)
+        schedule, sent_on = self.summaries[key]
+        if sent_on == day:
+            self.summaries[key] = (schedule, previous)
 
     def _update(self, workspace_id: UUID, **changes: object) -> None:
         for key, workspace in self.by_chat.items():

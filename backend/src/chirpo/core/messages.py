@@ -19,7 +19,7 @@ Commands:
 /unlink owner/repo - disconnect a repo (admins)
 /context on|off - keep recent messages so I understand follow-ups (admins)
 /personality off|light|playful - how chatty I am (admins)
-/settings - default repo, status labels, issue language (admins change them)
+/settings - default repo, status labels, language, daily summary, timezone (admins change them)
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -142,11 +142,15 @@ Status labels: {statuses}
 Issue language: {language}
 Personality: {personality}
 Context: {context}
+Daily summary: {summary}
+Timezone: {timezone}
 
 Admins change them:
 /settings repo owner/repo
 /settings status review = Needs review (or /settings status reset)
 /settings language English (or off)
+/settings summary 09:00 (add weekdays, or off)
+/settings timezone Africa/Douala
 /personality and /context"""
 SETTINGS_STATUS = '{status} = "{label}"'
 SETTINGS_LANGUAGE_MESSAGE = "the language of each message"
@@ -156,7 +160,25 @@ SETTINGS_CONTEXT_INSTANCE_OFF = "off for this chirpo"
 SETTINGS_USAGE = (
     "Usage: /settings shows them all. Admins: /settings repo owner/repo, "
     "/settings status review = Needs review, /settings status reset, "
-    "/settings language English, /settings language off."
+    "/settings language English, /settings language off, /settings summary 09:00, "
+    "/settings timezone Africa/Douala."
+)
+SUMMARY_AT = "{at}{days}"
+SUMMARY_WEEKDAYS = " on weekdays"
+SUMMARY_IS_OFF = "off"
+SUMMARY_SET = (
+    "Done: I'll post a daily summary here at {at}{days} ({timezone}). Everyone in this chat will "
+    "see issue titles from the linked repos, private ones included."
+)
+SUMMARY_OFF = "Done: no more daily summary here."
+SUMMARY_USAGE = (
+    "Usage: /settings summary 09:00 (24-hour time; add weekdays to skip weekends), "
+    "or /settings summary off."
+)
+TIMEZONE_SET = "Done: times here are now in {timezone}."
+TIMEZONE_UNKNOWN = (
+    "I don't know that timezone. Use a name like Africa/Douala, Europe/Paris, America/New_York "
+    "or UTC."
 )
 DEFAULT_REPO_SET = "Done: {repo} is now the default repo."
 DEFAULT_REPO_ALREADY = "{repo} is already the default repo."
@@ -315,6 +337,7 @@ DRY_FILTER_ASSIGNEE = " assigned to {login}"
 DRY_FILTER_LABELS = " labelled {labels}"
 DRY_FILTER_MILESTONE = " in {title}"
 DRY_FILTER_DUE = " (due {day} {month})"
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 NO_MILESTONE = "There's no open milestone in {repo}, so I can't tell which sprint you mean."
 WHICH_MILESTONE = "Which milestone do you mean: {names}?"
@@ -344,3 +367,18 @@ def duration(seconds: int) -> str:
         return f"{minutes} minutes"
     hours = math.ceil(minutes / 60)
     return "1 hour" if hours == 1 else f"{hours} hours"
+
+
+# Daily summary (M6.5)
+SUMMARY_HEADING = "Daily summary for {repo}, {day}"
+SUMMARY_CHANGES = "Since {when}: {opened} opened, {closed} closed"
+SUMMARY_QUIET = "A quiet day: nothing was opened or closed since {when}."
+SUMMARY_YESTERDAY = "yesterday"
+WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+SUMMARY_NEW = "New: {issues}"
+SUMMARY_MORE = ", and {count} more"
+SUMMARY_OPEN = "Open now: {count}{statuses}"
+SUMMARY_SPRINT = "{name}: due {due}, {count} open"
+SUMMARY_PRS = "PRs waiting for review: {count}"
+SUMMARY_NO_STATUS = "no status"
+SUMMARY_UNAVAILABLE = "{repo}: GitHub didn't answer, so there's no summary for it today."

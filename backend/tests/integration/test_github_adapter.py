@@ -677,3 +677,15 @@ async def test_rename_label_puts_the_whole_name_in_the_path(
     route = github.patch(url__regex=r".*/labels/.*").respond(200, json=payload("label_created"))
     await adapter.rename_label(REPO, label, "New")
     assert route.calls.last.request.url.raw_path.decode().endswith(f"/labels/{path}")
+
+
+async def test_list_issues_since_a_time_and_when_they_closed(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from datetime import UTC, datetime
+
+    route = github.get(ISSUES).respond(json=[payload("issue_closed")])
+    since = datetime(2026, 11, 7, 9, 0, tzinfo=UTC)
+    [issue] = await adapter.list_issues(REPO, IssueQuery(state="all", since=since))
+    assert params(route)["since"] == "2026-11-07T09:00:00Z"
+    assert issue.closed_at == datetime(2026, 11, 8, 10, 0, tzinfo=UTC)

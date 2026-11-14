@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -25,6 +25,7 @@ from chirpo.core.llm import MAX_MESSAGE_CHARS
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.statuses import STATUSES, StatusLabels, label_problem
+from chirpo.core.summary import parse_time, timezone_named
 from chirpo.core.workspaces import (
     DEFAULT_PERSONALITY,
     PERSONALITIES,
@@ -33,6 +34,8 @@ from chirpo.core.workspaces import (
     LinkedRepo,
     Member,
     Personality,
+    ScheduledSummary,
+    SummarySchedule,
     Workspace,
 )
 from chirpo.db import models as db
@@ -74,6 +77,10 @@ KEEP_CONTEXT = "keep_context"
 PERSONALITY = "personality"
 STATUS_LABELS = "status_labels"
 ISSUE_LANGUAGE = "issue_language"
+TIMEZONE = "timezone"
+# Keys in chat_connections.notify_prefs
+SUMMARY = "summary"  # {"at": "09:00", "weekdays": false}
+SUMMARY_SENT_ON = "summary_sent_on"  # the team's local day, "2026-11-13"
 
 
 MAX_KEPT_ATTACHMENTS = 10
@@ -250,6 +257,7 @@ def _to_workspace(row: db.Workspace) -> Workspace:
     default rather than break every request of the workspace."""
     stored = row.settings.get(PERSONALITY)
     language = row.settings.get(ISSUE_LANGUAGE)
+    zone = row.settings.get(TIMEZONE)
     return Workspace(
         id=row.id,
         name=row.name,
@@ -257,6 +265,29 @@ def _to_workspace(row: db.Workspace) -> Workspace:
         personality=stored if stored in PERSONALITIES else DEFAULT_PERSONALITY,
         statuses=_status_labels(row.settings.get(STATUS_LABELS)),
         issue_language=language if language in LANGUAGES else None,
+        timezone=zone if isinstance(zone, str) and timezone_named(zone) == zone else "UTC",
+    )
+
+
+def _to_schedule(prefs: dict[str, Any]) -> SummarySchedule | None:
+    stored = prefs.get(SUMMARY)
+    if not isinstance(stored, dict) or not isinstance(stored.get("at"), str):
+        return None
+    at = parse_time(stored["at"])
+    return SummarySchedule(at=at, weekdays_only=stored.get("weekdays") is True) if at else None
+
+
+def _sent_on(prefs: dict[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(prefs[SUMMARY_SENT_ON])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _same_chat(chat: ChatRef) -> tuple[ColumnElement[bool], ...]:
+    return (
+        db.ChatConnection.platform == chat.platform,
+        db.ChatConnection.external_chat_id == chat.chat_id,
     )
 
 
@@ -437,6 +468,81 @@ class SqlWorkspaces:
             update(db.Workspace)
             .where(db.Workspace.id == workspace_id)
             .values(settings=db.Workspace.settings.op("||")(bindparam("values", values, JSONB)))
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def set_timezone(self, workspace_id: UUID, name: str) -> None:
+        await self._merge_settings(workspace_id, {TIMEZONE: name})
+
+    async def summary_schedule(self, chat: ChatRef) -> SummarySchedule | None:
+        statement = select(db.ChatConnection.notify_prefs).where(*_same_chat(chat))
+        async with self._sessions() as session:
+            prefs = await session.scalar(statement)
+        return _to_schedule(prefs) if prefs else None
+
+    async def set_summary_schedule(self, chat: ChatRef, schedule: SummarySchedule | None) -> None:
+        prefs = db.ChatConnection.notify_prefs
+        if schedule is None:  # the key goes, so the scheduler no longer reads this chat
+            changed = prefs.op("-")(SUMMARY)
+        else:
+            value = {"at": schedule.at.strftime("%H:%M"), "weekdays": schedule.weekdays_only}
+            changed = prefs.op("||")(bindparam("prefs", {SUMMARY: value}, JSONB))
+        statement = update(db.ChatConnection).where(*_same_chat(chat)).values(notify_prefs=changed)
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def scheduled_summaries(self) -> list[ScheduledSummary]:
+        # Across all workspaces on purpose (the scheduler's only query without a workspace_id):
+        # each summary is then built only from its own chat's workspace.
+        statement = (
+            select(db.ChatConnection, db.Workspace)
+            .join(db.Workspace, db.Workspace.id == db.ChatConnection.workspace_id)
+            .where(db.ChatConnection.notify_prefs.has_key(SUMMARY))
+        )
+        async with self._sessions() as session:
+            rows = (await session.execute(statement)).all()
+        found = []
+        for chat, workspace in rows:
+            schedule = _to_schedule(chat.notify_prefs)
+            if schedule is not None:
+                found.append(
+                    ScheduledSummary(
+                        chat=ChatRef(platform=chat.platform, chat_id=chat.external_chat_id),
+                        workspace=_to_workspace(workspace),
+                        schedule=schedule,
+                        sent_on=_sent_on(chat.notify_prefs),
+                    )
+                )
+        return found
+
+    async def claim_summary(self, chat: ChatRef, day: date) -> bool:
+        """One statement: of two workers claiming the same day, only one changes the row."""
+        sent_on = db.ChatConnection.notify_prefs[SUMMARY_SENT_ON].astext
+        statement = (
+            update(db.ChatConnection)
+            .where(*_same_chat(chat), sent_on.is_distinct_from(day.isoformat()))
+            .values(
+                notify_prefs=db.ChatConnection.notify_prefs.op("||")(
+                    bindparam("sent", {SUMMARY_SENT_ON: day.isoformat()}, JSONB)
+                )
+            )
+            .returning(db.ChatConnection.id)
+        )
+        async with self._sessions.begin() as session:
+            return (await session.scalar(statement)) is not None
+
+    async def release_summary(self, chat: ChatRef, day: date, previous: date | None) -> None:
+        sent_on = db.ChatConnection.notify_prefs[SUMMARY_SENT_ON].astext
+        value = previous.isoformat() if previous else None
+        statement = (
+            update(db.ChatConnection)
+            .where(*_same_chat(chat), sent_on == day.isoformat())
+            .values(
+                notify_prefs=db.ChatConnection.notify_prefs.op("||")(
+                    bindparam("sent", {SUMMARY_SENT_ON: value}, JSONB)
+                )
+            )
         )
         async with self._sessions.begin() as session:
             await session.execute(statement)

@@ -154,3 +154,16 @@ async def test_tidying_without_github_configured_does_nothing() -> None:
     from chirpo.workers.main import expire_pending
 
     assert await expire_pending({"services": None}) == 0
+
+
+def test_summaries_are_checked_every_minute() -> None:
+    from chirpo.workers.main import send_summaries
+
+    [job] = [job for job in WorkerSettings.cron_jobs if job.coroutine is send_summaries]
+    assert (job.second, job.minute, job.hour) == (5, None, None)
+
+
+async def test_no_summaries_without_github() -> None:
+    from chirpo.workers.main import send_summaries
+
+    assert await send_summaries({"services": None, "messaging": {}}) == 0
