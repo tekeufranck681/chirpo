@@ -14,6 +14,7 @@ from chirpo.core.domain import AuditResult, ChatRef, ChatUser, RepoRef
 from chirpo.core.errors import LastAdminError
 from chirpo.core.permissions import Role
 from chirpo.core.ports import AuditLog, Members, Workspaces
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import AuditEntry, CodeHostAccount
 from chirpo.db import models as db
 from chirpo.db.repositories import SqlAuditLog, SqlMembers, SqlWorkspaces
@@ -361,3 +362,37 @@ async def test_the_personality_defaults_to_light_and_survives_a_reload(stores: S
     found = await stores.workspaces.for_chat(chat)
     assert found is not None and found.personality == "off"
     assert found.keeps_context  # another setting is left alone
+
+
+async def test_another_linked_repo_becomes_the_default(stores: Stores) -> None:
+    workspace = await stores.workspaces.get_or_create_for_chat(new_chat(), name="Team")
+    await stores.workspaces.link_repo(workspace.id, repo("acme/shop-app"))
+    await stores.workspaces.link_repo(workspace.id, repo("acme/shop-api"))
+    assert await stores.workspaces.set_default_repo(workspace.id, repo("ACME/shop-api"))
+    links = await stores.workspaces.repos(workspace.id)
+    assert [(link.repo.full_name, link.is_default) for link in links] == [
+        ("acme/shop-api", True),
+        ("acme/shop-app", False),
+    ]
+    assert await stores.workspaces.set_default_repo(workspace.id, repo("acme/shop-api"))  # again
+    assert not await stores.workspaces.set_default_repo(workspace.id, repo("acme/elsewhere"))
+    links = await stores.workspaces.repos(workspace.id)
+    assert [link.is_default for link in links] == [True, False]
+
+
+async def test_status_labels_and_issue_language_survive_a_reload(stores: Stores) -> None:
+    chat = new_chat()
+    workspace = await stores.workspaces.get_or_create_for_chat(chat, name="Team")
+    assert workspace.statuses == StatusLabels() and workspace.issue_language is None
+    labels = StatusLabels().with_label("in progress", "WIP")
+    await stores.workspaces.set_status_labels(workspace.id, labels)
+    await stores.workspaces.set_issue_language(workspace.id, "fr")
+    await stores.workspaces.set_personality(workspace.id, "playful")
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None
+    assert (found.statuses, found.issue_language, found.personality) == (labels, "fr", "playful")
+    await stores.workspaces.set_issue_language(workspace.id, None)
+    await stores.workspaces.set_status_labels(workspace.id, StatusLabels())
+    found = await stores.workspaces.for_chat(chat)
+    assert found is not None
+    assert (found.statuses, found.issue_language) == (StatusLabels(), None)

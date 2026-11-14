@@ -28,6 +28,7 @@ from chirpo.core.domain import (
     RepoRef,
 )
 from chirpo.core.images import sniff
+from chirpo.core.languages import LANGUAGES
 from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
 from chirpo.core.pending import Step as PendingStep
 from chirpo.core.permissions import Action, Role
@@ -85,6 +86,7 @@ class Case:
     pending: tuple[PendingStep, ...] = ()
     # (sender, text) messages only this case sees, the newest in the chat ("my last message").
     recent_extra: tuple[tuple[str, str], ...] = ()
+    issue_language: str | None = None  # the workspace's /settings language (M6.4), a code
 
 
 @dataclass
@@ -438,6 +440,9 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
     recent_image = raw.get("recent_image")
     if recent_image is not None and not (IMAGES_DIR / recent_image).is_file():
         raise ValueError(f"case {raw['id']}: no image {recent_image}")
+    issue_language = raw.get("issue_language")
+    if issue_language is not None and issue_language not in LANGUAGES:
+        raise ValueError(f"case {raw['id']}: unknown issue_language {issue_language}")
     extra = tuple((m["from"], m["text"]) for m in raw.get("recent_extra", ()))
     for sender, _ in extra:
         if sender not in fx.names:
@@ -456,6 +461,7 @@ def _case(raw: Mapping[str, Any], fx: Fixture) -> Case:
         look=raw.get("look"),
         pending=_pending_steps(raw.get("pending", ()), fx, raw["id"]),
         recent_extra=extra,
+        issue_language=issue_language,
     )
 
 

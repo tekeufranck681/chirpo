@@ -6,12 +6,13 @@ block is capped in size and later wrapped in a marker-named block by `interpret_
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chirpo.core.actions import hidden_char, unsafe_char
 from chirpo.core.domain import AttachmentKind, Issue, RecentMessage, RepoRef
 from chirpo.core.images import can_read
 from chirpo.core.pending import Step
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import LinkedRepo, Member
 
 MAX_MEMBERS = 50
@@ -29,6 +30,7 @@ class Team:
     members: Sequence[Member]
     repos: Sequence[LinkedRepo]
     open_issues: Sequence[Issue]  # of the default repo, newest first
+    statuses: StatusLabels = field(default_factory=StatusLabels)  # the workspace's (M6.4)
 
     @property
     def default_repo(self) -> RepoRef:

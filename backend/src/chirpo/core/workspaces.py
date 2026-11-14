@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chirpo.core.domain import AuditResult, RepoRef
 from chirpo.core.permissions import Role
+from chirpo.core.statuses import StatusLabels
 
 # How chatty the bot is when someone makes small talk (D24, M6.11).
 Personality = Literal["off", "light", "playful"]
@@ -21,6 +22,8 @@ class Workspace(BaseModel):
     name: str
     keeps_context: bool = True  # recent messages kept for the LLM (D46); admins turn it off
     personality: Personality = DEFAULT_PERSONALITY  # admins change it with /personality
+    statuses: StatusLabels = StatusLabels()  # the team's status labels (/settings status)
+    issue_language: str | None = None  # a code from core/languages.py; None: the message's own
 
 
 class LinkedRepo(BaseModel):

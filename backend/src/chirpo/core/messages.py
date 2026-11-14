@@ -19,6 +19,7 @@ Commands:
 /unlink owner/repo - disconnect a repo (admins)
 /context on|off - keep recent messages so I understand follow-ups (admins)
 /personality off|light|playful - how chatty I am (admins)
+/settings - default repo, status labels, issue language (admins change them)
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -135,6 +136,57 @@ PERSONALITY_SET = "Done: my tone here is now {level}."
 PERSONALITY_USAGE = (
     "Usage: /personality off, light or playful (admins). /personality alone shows the setting."
 )
+SETTINGS = """Settings for this chat:
+Default repo: {repo}
+Status labels: {statuses}
+Issue language: {language}
+Personality: {personality}
+Context: {context}
+
+Admins change them:
+/settings repo owner/repo
+/settings status review = Needs review (or /settings status reset)
+/settings language English (or off)
+/personality and /context"""
+SETTINGS_STATUS = '{status} = "{label}"'
+SETTINGS_LANGUAGE_MESSAGE = "the language of each message"
+SETTINGS_NO_REPO = "none linked yet"
+SETTINGS_CONTEXT = {True: "on", False: "off"}
+SETTINGS_CONTEXT_INSTANCE_OFF = "off for this chirpo"
+SETTINGS_USAGE = (
+    "Usage: /settings shows them all. Admins: /settings repo owner/repo, "
+    "/settings status review = Needs review, /settings status reset, "
+    "/settings language English, /settings language off."
+)
+DEFAULT_REPO_SET = "Done: {repo} is now the default repo."
+DEFAULT_REPO_ALREADY = "{repo} is already the default repo."
+STATUS_LABEL_SET = 'Done: the "{status}" status is now the label "{label}".'
+LABEL_RENAMED = '{repo}: renamed "{old}" to "{new}" on GitHub, on every issue that had it.'
+LABEL_BOTH = '{repo}: "{new}" already exists, so issues with "{old}" keep it.'
+LABEL_NO_ACCESS = (
+    "{repo}: you can't edit labels there on GitHub (it needs write access), so issues with "
+    '"{old}" keep it.'
+)
+LABEL_NOT_RENAMED = '{repo}: GitHub didn\'t rename "{old}", so issues with it keep it for now.'
+STATUS_LABELS_RESET = (
+    "Done: statuses use the default labels again "
+    "(status: todo, status: in progress, status: review, status: done)."
+)
+STATUS_LABEL_LENGTH = "A label name has 1 to {limit} characters."
+STATUS_LABEL_CHARACTERS = "A label name can't have line breaks or invisible characters."
+STATUS_LABEL_TAKEN = 'That name already means the "{status}" status.'
+STATUS_LABEL_ORDINARY = (
+    'GitHub uses "{label}" as an ordinary label: as a status, I would take it off every issue I '
+    "move. Pick another name."
+)
+STATUS_LABELS_CHANGED = "The status labels changed since this was proposed. Ask me again."
+LANGUAGE_SET = (
+    "Done: I'll write issue titles, descriptions and comments in {language}, whatever language "
+    "you write in here."
+)
+LANGUAGE_OFF = "Done: issues and comments follow the language of each message again."
+LANGUAGE_UNKNOWN = "I don't know that language. I know: {names}."
+
 ALREADY_LINKED = "{repo} is already linked here."
 
 UNLINK_USAGE = "Tell me which repo: /unlink owner/repo"

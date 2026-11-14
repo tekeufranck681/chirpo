@@ -36,6 +36,7 @@ from chirpo.core.domain import Issue, IssueQuery, IssueState, Milestone, RepoRef
 from chirpo.core.errors import CodeHostNotFoundError
 from chirpo.core.outbound import shown
 from chirpo.core.ports import CodeHostAdapter
+from chirpo.core.statuses import StatusLabels, status_named
 from chirpo.core.workspaces import Member
 
 ME = frozenset({"me", "myself", "i"})
@@ -54,26 +55,6 @@ CURRENT_MILESTONE = frozenset(
     }
 )
 MAX_MILESTONES_NAMED = 5
-STATUS_LABELS = {
-    "todo": "status: todo",
-    "in progress": "status: in progress",
-    "review": "status: review",
-    "done": "status: done",
-}
-_STATUS_WORDS = {
-    "to do": "todo",
-    "backlog": "todo",
-    "doing": "in progress",
-    "wip": "in progress",
-    "started": "in progress",
-    "working": "in progress",
-    "in review": "review",
-    "needs review": "review",
-    "reviewing": "review",
-    "finished": "done",
-    "complete": "done",
-    "completed": "done",
-}
 _IGNORED_WORDS = frozenset(
     {"the", "a", "an", "issue", "bug", "ticket", "one", "that", "this", "about", "with", "for",
      "on", "in", "of", "to", "and", "is", "it"}
@@ -174,7 +155,7 @@ class _Resolver:
             case AssignIssue() | UnassignIssue():
                 update["assignees"] = self._logins(proposal.assignees)
             case SetStatus():
-                update["status"] = _status_label(proposal.status)
+                update["status"] = _status_label(proposal.status, self.team.statuses)
             case AddLabels() | RemoveLabels():
                 update["labels"] = await self._labels_or_ask(repo, proposal.labels)
             case ListIssues():
@@ -378,14 +359,11 @@ def _handles(member: Member) -> set[str]:
     return {handle.casefold() for handle in handles if handle}
 
 
-def _status_label(said: str) -> str:
-    key = " ".join(
-        said.casefold().removeprefix("status:").replace("-", " ").replace("_", " ").split()
-    )
-    key = _STATUS_WORDS.get(key, key)
-    if key not in STATUS_LABELS:
-        raise _Unclear(messages.STATUS_UNKNOWN.format(status=said))
-    return STATUS_LABELS[key]
+def _status_label(said: str, labels: StatusLabels) -> str:
+    status = status_named(said, labels)
+    if status is None:
+        raise _Unclear(messages.STATUS_UNKNOWN.format(status=shown(said, MAX_NAME)))
+    return labels.label(status)
 
 
 def _words(text: str) -> set[str]:

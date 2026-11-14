@@ -24,6 +24,7 @@ from chirpo.core.executor import execute
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Action
 from chirpo.core.resolution import Resolved, significant_words
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import Member
 
 log = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ async def run_now(
     asker: Member,
     services: Services,
     steps: Sequence[Resolved],
+    statuses: StatusLabels,
     notes: Sequence[str] = (),
 ) -> None:
     """Runs the steps for the asker and answers once, with Undo when something changed. The row
@@ -96,6 +98,7 @@ async def run_now(
             requester=asker,
             confirmer=None,
             services=services,
+            statuses=statuses,
             pending_id=pending.id,
         )
     except BaseException:  # a cancelled job too: the row must not stay "executing"

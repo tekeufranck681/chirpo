@@ -477,6 +477,23 @@ cases:
     expect:
       - {action: create_issue, people: [], title_words: [sign, email]}
 
+  # Issue language set with /settings (M6.4): GitHub text in that language, whatever the message's.
+  - id: lang-setting-english
+    category: language
+    from: franck
+    issue_language: en
+    text: "le paiement par carte plante sur Android 13, c'est urgent"
+    expect:
+      - {action: create_issue, title_words: [pay, card]}
+
+  - id: lang-setting-french
+    category: language
+    from: annie
+    issue_language: fr
+    text: "the export button does nothing on Safari, log it"
+    expect:
+      - {action: create_issue, title_words: [bouton, rien, fonctionne, marche]}
+
   # ------------------------------------------------------------ images (D50)
   - id: img-crash-own
     category: image

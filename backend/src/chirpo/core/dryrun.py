@@ -22,6 +22,7 @@ from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import RepoRef
 from chirpo.core.outbound import shown
 from chirpo.core.resolution import Resolved
+from chirpo.core.statuses import shown_status
 
 MAX_TITLE = 256  # GitHub's limit: a title is always shown whole
 MAX_TEXT = 600  # characters of a body or comment shown on the card
@@ -48,7 +49,7 @@ def _lines(step: Resolved, default_repo: RepoRef, limit: int) -> list[str]:
         case UnassignIssue():
             return [messages.DRY_UNASSIGN.format(people=_people(proposal.assignees), issue=issue)]
         case SetStatus():
-            status = proposal.status.removeprefix("status: ")
+            status = shown(shown_status(proposal.status), MAX_NAME)
             return [messages.DRY_STATUS.format(issue=issue, status=status)]
         case AddLabels():
             return [messages.DRY_ADD_LABELS.format(labels=_labels(proposal.labels), issue=issue)]

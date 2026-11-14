@@ -121,6 +121,7 @@ async def _run_one(llm: LLMProvider, case: Case, fixture: Fixture, sleep: Sleep)
                 images=images_for(case),
                 candidate=candidate,
                 fetch=fetch,
+                issue_language=case.issue_language,
             )
         except LLMRateLimitedError as error:
             if tries == RATE_LIMIT_TRIES:

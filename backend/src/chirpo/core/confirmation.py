@@ -27,6 +27,7 @@ from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
 from chirpo.core.ports import MessagingAdapter
 from chirpo.core.resolution import Resolved
+from chirpo.core.statuses import StatusLabels
 from chirpo.core.workspaces import AuditEntry, Member
 
 MAX_CARD = 4000  # Telegram refuses messages over 4096 characters
@@ -198,7 +199,7 @@ async def handle_callback(
         await press.answer(messages.CB_NOT_ALLOWED.format(name=name))
         return
     card = SentMessage(chat=event.chat, message_id=event.message_id)  # checked: it is the row's
-    run = _Handling(press, services, row, asker, presser, card)
+    run = _Handling(press, services, row, asker, presser, card, workspace.statuses)
     if kind == UNDO:
         await run.undo()
     elif row.is_expired(services.now()):
@@ -240,9 +241,11 @@ class _Handling:
         asker: Member,
         presser: Member,
         card: SentMessage,
+        statuses: StatusLabels,
     ) -> None:
         self.press, self.services, self.row = press, services, row
         self.asker, self.presser, self.card = asker, presser, card
+        self.statuses = statuses
 
     async def cancel(self) -> None:
         if not await self._advance(PendingStatus.PROPOSED, PendingStatus.REJECTED):
@@ -271,6 +274,7 @@ class _Handling:
                 requester=self.asker,
                 confirmer=self.presser,
                 services=self.services,
+                statuses=self.statuses,
                 pending_id=self.row.id,
             )
             status = PendingStatus.FAILED if outcome.problem else PendingStatus.EXECUTED

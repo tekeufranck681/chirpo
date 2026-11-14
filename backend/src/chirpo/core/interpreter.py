@@ -191,7 +191,12 @@ async def _answer_timed(
         raise error from None
     open_issues, (recent, replied) = issues.result(), conversation.result()
     seen = seen_task.result()
-    team = Team(members=members.result(), repos=repos, open_issues=open_issues)
+    team = Team(
+        members=members.result(),
+        repos=repos,
+        open_issues=open_issues,
+        statuses=actor.workspace.statuses,
+    )
     timer.lap("context")
     # An image nobody attached is only looked at if the model asks (D52).
     look = None
@@ -213,6 +218,7 @@ async def _answer_timed(
         candidate=look.attachment if look else None,
         charge=_charger(services, actor),
         personality=actor.workspace.personality,
+        issue_language=actor.workspace.issue_language,
     )
     notes = seen.notes
     del seen  # the image bytes are done with
@@ -276,7 +282,7 @@ async def _answer_timed(
         fresh = services.now() - request.message.sent_at <= services.stale_after
         own, quoted = request.message.text, replied.text if replied else ""
         if replacing is None and fresh and runs_without_card(changes, own, quoted):
-            await run_now(request, actor.member, services, changes, notes)
+            await run_now(request, actor.member, services, changes, actor.workspace.statuses, notes)
             timer.lap("reply")
             return
         if not fresh:
@@ -367,6 +373,7 @@ async def _ask_model(
     candidate: Attachment | None,
     charge: Charge,
     personality: Personality,
+    issue_language: str | None,
 ) -> Asked | None:
     """The model's answer, or None after telling the person why there is none."""
     sender = request.message.sender.display_name
@@ -385,6 +392,7 @@ async def _ask_model(
             fetch=fetch,
             charge=charge,
             personality=personality,
+            issue_language=issue_language,
         )
     except LLMRateLimitedError:
         await request.reply(messages.LLM_BUSY)

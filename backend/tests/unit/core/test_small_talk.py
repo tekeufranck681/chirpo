@@ -187,8 +187,8 @@ async def test_playful_adds_its_own_rules() -> None:
 def test_the_prompt_sections_include_small_talk_and_playful_in_a_fixed_order() -> None:
     from chirpo.core.llm import SECTIONS, system_prompt
 
-    assert SECTIONS == ("images", "proposal", "smalltalk", "playful")
-    full = system_prompt(frozenset(SECTIONS))
+    assert SECTIONS == ("images", "proposal", "smalltalk", "playful", "language")
+    full = system_prompt(frozenset(SECTIONS) - {"language"})
     positions = [full.index(marker) for marker in ("## Small talk", "## Playful")]
     assert positions == sorted(positions)
 

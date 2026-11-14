@@ -45,19 +45,12 @@ from chirpo.core.errors import CodeHostError, CodeHostNotFoundError
 from chirpo.core.outbound import neutralise, shown
 from chirpo.core.pending import Step
 from chirpo.core.permissions import Action
-from chirpo.core.resolution import STATUS_LABELS
+from chirpo.core.statuses import COLORS, DEFAULT_PREFIX, StatusLabels, clears, shown_status
 from chirpo.core.workspaces import AuditEntry, Member
 
 log = logging.getLogger(__name__)
 
 MAX_TITLE = 256  # GitHub's limit; cleaning can add characters
-STATUS_PREFIX = "status: "
-STATUS_COLORS = {
-    "status: todo": "ededed",
-    "status: in progress": "fbca04",
-    "status: review": "5319e7",
-    "status: done": "0e8a16",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,10 +87,12 @@ async def execute(
     requester: Member,
     confirmer: Member | None,
     services: Services,
+    statuses: StatusLabels,
     pending_id: UUID | None = None,
 ) -> Outcome:
     """Runs the steps in order for `requester`. `confirmer` is who pressed Confirm, or None when
-    nobody had to (status and label changes the sender named, D56)."""
+    nobody had to (status and label changes the sender named, D56). `statuses`: the workspace's
+    status labels as they are now."""
     done: list[str] = []
     effects: list[dict[str, Any]] = []
     for index, step in enumerate(steps):
@@ -110,7 +105,7 @@ async def execute(
             repo, proposal = _load(step)
             payload["repo"] = repo.full_name
             await _guard(proposal, repo, requester, services)
-            await _run(proposal, repo, requester, services, run)
+            await _run(proposal, repo, requester, services, run, statuses)
 
         result, error, reason = await _attempt(step.action, work)
         done += run.lines
@@ -145,9 +140,10 @@ async def undo(
             issue = await services.codehost.get_issue(repo, effect["number"])
             current = _without(issue.labels, effect["added"])
             restore = effect["removed"]
-            if any(label.startswith(STATUS_PREFIX) for label in current):
+            is_status = _status_test(effect)
+            if any(is_status(label) for label in current):
                 # Somebody set another status since: putting the old one back would leave two.
-                restore = [label for label in restore if not label.startswith(STATUS_PREFIX)]
+                restore = [label for label in restore if not is_status(label)]
             labels = _union(current, restore)
             await services.codehost.update_issue(repo, issue.number, IssuePatch(labels=labels))
             done.append(messages.DONE_UNDO_LABELS.format(issue=_ref(issue)))
@@ -245,7 +241,12 @@ async def _check(action: Action, repo: RepoRef, requester: Member, services: Ser
 
 
 async def _run(
-    proposal: Proposal, repo: RepoRef, requester: Member, services: Services, run: _Run
+    proposal: Proposal,
+    repo: RepoRef,
+    requester: Member,
+    services: Services,
+    run: _Run,
+    statuses: StatusLabels,
 ) -> None:
     host = services.codehost
     login = requester.codehost.login if requester.codehost else "?"
@@ -282,15 +283,15 @@ async def _run(
             )
         case SetStatus():
             issue = await _issue(proposal, repo, services)
-            after = await _set_status(proposal.status, issue, repo, services)
-            _record(run, repo, issue, after)
-            status = proposal.status.removeprefix(STATUS_PREFIX)
+            after = await _set_status(proposal.status, issue, repo, services, statuses)
+            _record(run, repo, issue, after, statuses)
+            status = shown(shown_status(proposal.status), MAX_NAME)
             run.lines.append(messages.DONE_STATUS.format(issue=_ref(issue), status=status))
         case AddLabels():
             issue = await _issue(proposal, repo, services)
             labels = _union(issue.labels, proposal.labels)
             await host.update_issue(repo, issue.number, IssuePatch(labels=labels))
-            _record(run, repo, issue, labels)
+            _record(run, repo, issue, labels, statuses)
             run.lines.append(
                 messages.DONE_ADDED_LABELS.format(
                     labels=_labels(proposal.labels), issue=_ref(issue)
@@ -304,7 +305,7 @@ async def _run(
                 if not any(same_login(label, r) for r in proposal.labels)
             )
             await host.update_issue(repo, issue.number, IssuePatch(labels=kept))
-            _record(run, repo, issue, kept)
+            _record(run, repo, issue, kept, statuses)
             run.lines.append(
                 messages.DONE_REMOVED_LABELS.format(
                     labels=_labels(proposal.labels), issue=_ref(issue)
@@ -347,34 +348,52 @@ async def _issue(proposal: Any, repo: RepoRef, services: Services) -> Issue:
 
 
 async def _set_status(
-    status: str, issue: Issue, repo: RepoRef, services: Services
+    label: str, issue: Issue, repo: RepoRef, services: Services, statuses: StatusLabels
 ) -> tuple[str, ...]:
-    """Makes `status` the issue's only status label; returns the labels it now has."""
-    if status not in STATUS_LABELS.values():
-        raise _Stop(messages.STEP_BROKEN, code="invalid_step")
-    await services.codehost.ensure_labels(
-        repo, [LabelSpec(name=status, color=STATUS_COLORS[status])]
-    )
-    others = tuple(label for label in issue.labels if not label.startswith(STATUS_PREFIX))
-    labels = (*others, status)
+    """Makes `label` the issue's only status label; returns the labels it now has. A label that
+    isn't one of the workspace's (renamed since the card was posted) stops the step."""
+    status = statuses.status_of(label)
+    if status is None:
+        raise _Stop(messages.STATUS_LABELS_CHANGED, code="status_labels_changed")
+    label = statuses.label(status)
+    await services.codehost.ensure_labels(repo, [LabelSpec(name=label, color=COLORS[status])])
+    cleared = {name.casefold() for name in clears(statuses)}
+    others = tuple(name for name in issue.labels if name.casefold() not in cleared)
+    labels = (*others, label)
     await services.codehost.update_issue(repo, issue.number, IssuePatch(labels=labels))
     return labels
 
 
-def _record(run: _Run, repo: RepoRef, issue: Issue, after: Sequence[str]) -> None:
-    """What this step did to the labels, for Undo; nothing if it changed nothing."""
+def _record(
+    run: _Run,
+    repo: RepoRef,
+    issue: Issue,
+    after: Sequence[str],
+    statuses: StatusLabels,
+) -> None:
+    """What this step did to the labels, for Undo; nothing if it changed nothing. It also keeps
+    which labels were statuses then, so Undo still knows after a rename."""
     added = [label for label in after if not _has(issue.labels, label)]
     removed = [label for label in issue.labels if not _has(after, label)]
     if added or removed:
-        run.effects.append(
-            {
-                "provider": repo.provider,
-                "repo": repo.full_name,
-                "number": issue.number,
-                "added": added,
-                "removed": removed,
-            }
-        )
+        effect: dict[str, Any] = {
+            "provider": repo.provider,
+            "repo": repo.full_name,
+            "number": issue.number,
+            "added": added,
+            "removed": removed,
+            "statuses": clears(statuses),
+        }
+        run.effects.append(effect)
+
+
+def _status_test(effect: Mapping[str, Any]) -> Callable[[str], bool]:
+    """Which labels were statuses when the change ran; effects from before M6.4 don't say, and
+    statuses were then the `status: ` labels."""
+    named = {str(label).casefold() for label in effect.get("statuses") or ()}
+    if named:
+        return lambda label: label.casefold() in named
+    return lambda label: label.startswith(DEFAULT_PREFIX)
 
 
 def _has(labels: Sequence[str], label: str) -> bool:
