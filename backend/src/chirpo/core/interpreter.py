@@ -298,8 +298,10 @@ async def _typing(request: Request) -> AsyncIterator[None]:
     messaging, chat = request.messaging, request.message.chat
 
     async def show() -> None:
-        with suppress(MessagingError):  # only a courtesy
+        try:
             await messaging.show_typing(chat)
+        except MessagingError as error:  # only a courtesy, but say why it's missing
+            log.info("typing_failed error=%s", type(error).__name__)
 
     async def keep_typing() -> None:
         while True:
