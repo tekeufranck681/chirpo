@@ -399,3 +399,92 @@ async def test_resolved_proposals_are_validated_again(world: World) -> None:
     assert type(resolved.proposal).model_validate(resolved.proposal.model_dump()) == (
         resolved.proposal
     )
+
+
+# ------------------------------------------------------------------ several repos (M6.6)
+
+WEB = RepoRef.parse("github", "tekeufranck681/chirpo-web")
+API = RepoRef.parse("github", "tekeufranck681/chirpo_api")
+WEB_ADMIN = RepoRef.parse("github", "tekeufranck681/chirpo-web-admin")
+
+
+async def resolved_in(world: World, name: str, *extra: RepoRef) -> RepoRef | str:
+    """The repo `name` resolves to with sandbox (default), web and api linked, or the question."""
+    team = Team(
+        members=world.members,
+        repos=[
+            LinkedRepo(repo=SANDBOX, is_default=True),
+            *(LinkedRepo(repo=r, is_default=False) for r in (WEB, API, *extra)),
+        ],
+        open_issues=[],
+    )
+
+    async def yes(repo: RepoRef) -> bool:
+        return True
+
+    result = await resolve(
+        [create(repo=name)], team=team, sender=FRANCK, codehost=world.codehost, can_read=yes
+    )
+    if isinstance(result, Question):
+        return result.text
+    assert result is not None
+    return result[0].repo
+
+
+@pytest.mark.parametrize("name", ["web", "WEB", "chirpo web", "chirpo-web", "the web repo"])
+async def test_a_repo_named_the_way_people_say_it(world: World, name: str) -> None:
+    assert await resolved_in(world, name) == WEB
+
+
+async def test_words_split_on_underscores_and_dots_too(world: World) -> None:
+    assert await resolved_in(world, "api") == API
+
+
+async def test_an_exact_name_wins_over_a_word(world: World) -> None:
+    assert await resolved_in(world, "chirpo-web", WEB_ADMIN) == WEB
+
+
+async def test_a_word_in_two_repo_names_asks_which(world: World) -> None:
+    assert await resolved_in(world, "web", WEB_ADMIN) == messages.REPO_AMBIGUOUS.format(
+        name="web", options=f"{WEB.full_name}, {WEB_ADMIN.full_name}"
+    )
+
+
+async def test_a_word_that_matches_no_repo_asks(world: World) -> None:
+    linked = f"{SANDBOX.full_name}, {WEB.full_name}, {API.full_name}"
+    assert await resolved_in(world, "mobile") == messages.REPO_NOT_LINKED.format(
+        name="mobile", repos=linked
+    )
+
+
+async def test_common_words_alone_match_nothing(world: World) -> None:
+    assert isinstance(await resolved_in(world, "the repo"), str)
+
+
+async def test_a_repo_name_in_a_question_cannot_mention(world: World) -> None:
+    from chirpo.core.outbound import ZWSP
+
+    text = await resolved_in(world, "@annie_n")
+    assert isinstance(text, str) and "@annie_n" not in text and f"@{ZWSP}annie_n" in text
+
+
+async def test_numbers_and_single_letters_are_not_enough_to_name_a_repo(world: World) -> None:
+    v2 = RepoRef.parse("github", "tekeufranck681/svc-2")
+    assert isinstance(await resolved_in(world, "2", v2), str)
+
+
+def test_only_exact_names_count_as_exact() -> None:
+    from chirpo.core.resolution import exact_repo_name
+
+    assert exact_repo_name("tekeufranck681/chirpo-web", WEB)
+    assert exact_repo_name("Chirpo Web", WEB)
+    assert not exact_repo_name("web", WEB)
+    assert not exact_repo_name("chirpo", WEB)
+
+
+async def test_a_number_next_to_a_word_tells_two_repos_apart(world: World) -> None:
+    second = RepoRef.parse("github", "tekeufranck681/chirpo-sandbox-2")
+    assert await resolved_in(world, "sandbox 2", second) == second
+    assert await resolved_in(world, "sandbox-2", second) == second
+    assert await resolved_in(world, "chirpo-sandbox", second) == SANDBOX  # the exact name
+    assert isinstance(await resolved_in(world, "sandbox", second), str)  # both: ask which

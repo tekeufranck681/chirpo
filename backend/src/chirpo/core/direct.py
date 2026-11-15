@@ -60,7 +60,7 @@ def runs_without_card(steps: Sequence[Resolved], own: str, replied: str = "") ->
 
 def _runs_without_card(step: Resolved, own: str, replied: str) -> bool:
     spec = spec_of(step.proposal)
-    if spec.needs_confirmation or spec.permission in (None, Action.VIEW):
+    if spec.needs_confirmation or spec.permission in (None, Action.VIEW) or step.loose_repo:
         return False
     return step.ref is not None and named_in(step.ref, own, replied)
 

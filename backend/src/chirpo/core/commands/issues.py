@@ -1,15 +1,18 @@
-"""/issue <title>: create an issue in the chat's default repo, noting who asked."""
+"""/issue [repo:] <title>: create an issue, in the default repo or a linked one named before a
+colon ("/issue web: Footer broken"), noting who asked."""
 
 from pydantic import ValidationError
 
 from chirpo.core import messages
 from chirpo.core.commands.base import Request, allowed, audit, find_actor, limited
-from chirpo.core.domain import AuditResult, NewIssue
+from chirpo.core.domain import AuditResult, NewIssue, RepoRef
 from chirpo.core.errors import CodeHostError
 from chirpo.core.outbound import shown
 from chirpo.core.permissions import Action
+from chirpo.core.resolution import repos_named
 
 MAX_SHOWN_TITLE = 256  # GitHub's own limit
+MAX_REPO_WORDS = 3  # "chirpo sandbox 2:" at most; longer text before a colon is the title
 
 
 async def issue(request: Request) -> None:
@@ -24,7 +27,10 @@ async def issue(request: Request) -> None:
     if not linked:
         await request.reply(messages.NO_REPO_LINKED)
         return
-    repo = linked[0].repo  # the default comes first
+    repo, title = _repo_and_title(title, [link.repo for link in linked])
+    if not title:
+        await request.reply(messages.ISSUE_USAGE)
+        return
     if not await allowed(request, actor, Action.CREATE_ISSUE, repo):
         return
     login = actor.member.codehost.login if actor.member.codehost else "?"
@@ -56,3 +62,14 @@ async def issue(request: Request) -> None:
             number=created.number, title=shown(created.title, MAX_SHOWN_TITLE), url=created.url
         )
     )
+
+
+def _repo_and_title(text: str, linked: list[RepoRef]) -> tuple[RepoRef, str]:
+    """`web: Footer broken` goes to the one linked repo "web" names; anything else, including
+    `Crash: checkout` when no repo is called that, is a title for the default (listed first)."""
+    before, colon, after = text.partition(":")
+    if colon and len(before.split()) <= MAX_REPO_WORDS:
+        found = repos_named(before, linked)
+        if len(found) == 1:
+            return found[0], after.strip()
+    return linked[0], text

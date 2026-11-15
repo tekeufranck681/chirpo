@@ -13,7 +13,7 @@ Commands:
 /iam - link your GitHub account (once)
 /iam_switch - link a different GitHub account
 /link owner/repo - connect a repo to this chat
-/issue <title> - create an issue in the default repo
+/issue [repo:] <title> - create an issue (in the default repo unless you name one)
 /members - who's here, their role and GitHub account
 /role @name admin|maintainer|member - change someone's role (admins)
 /unlink owner/repo - disconnect a repo (admins)
@@ -229,7 +229,10 @@ ROLE_CHANGED = "{name} is now {role}."
 MEMBER_AMBIGUOUS = "Several people here match {name}. Use their GitHub name instead."
 MEMBERS_MORE = "... and {count} more."
 
-ISSUE_USAGE = "Give the issue a title: /issue Login button broken"
+ISSUE_USAGE = (
+    "Give the issue a title: /issue Login button broken. For another linked repo, name it first: "
+    "/issue web: Footer links broken"
+)
 ISSUE_TITLE_TOO_LONG = "That title is too long for GitHub (256 characters at most)."
 ISSUE_BODY = "Requested by @{login} via chirpo."  # the same line closes every posted text
 ISSUE_CREATED = "Created #{number}: {title}\n{url}"

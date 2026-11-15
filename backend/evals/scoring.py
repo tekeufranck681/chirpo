@@ -32,7 +32,7 @@ from chirpo.core.languages import LANGUAGES
 from chirpo.core.llm import IMAGE_OWN, IMAGE_RECENT, IMAGE_REPLIED, RequestImage
 from chirpo.core.pending import Step as PendingStep
 from chirpo.core.permissions import Action, Role
-from chirpo.core.resolution import CURRENT_MILESTONE
+from chirpo.core.resolution import CURRENT_MILESTONE, repos_named
 from chirpo.core.workspaces import CodeHostAccount, LinkedRepo, Member
 
 CASES_FILE = Path(__file__).with_name("cases.yaml")
@@ -298,7 +298,7 @@ def _check(step: Step, proposal: Proposal, case: Case, fx: Fixture) -> list[str]
         )
     if "reason" in step and str(values["reason"]) != step["reason"]:
         problems.append(f"{name}: reason {values['reason']}, expected {step['reason']}")
-    if "repo" in step and not _same_repo(step["repo"], values.get("repo")):
+    if "repo" in step and not _same_repo(step["repo"], values.get("repo"), fx):
         problems.append(f"{name}: repo {values.get('repo')!r}, expected {step['repo']!r}")
     if "state" in step and values["state"] != step["state"]:
         problems.append(f"{name}: state {values['state']}, expected {step['state']}")
@@ -338,9 +338,15 @@ def _same_issue(number: int | None, words: Sequence[str], issue: IssueRef) -> bo
     return issue.description is not None and _has_word([issue.description], words)
 
 
-def _same_repo(expected: str | None, written: str | None) -> bool:
+def _same_repo(expected: str | None, written: str | None, fx: Fixture) -> bool:
+    """A linked repo the case names must be the one chirpo would resolve the model's text to;
+    a name that isn't linked must reach chirpo as said, so it can ask."""
     if expected is None:
         return written is None
+    linked = [link.repo for link in fx.team.repos]
+    target = repos_named(expected, linked)
+    if len(target) == 1:
+        return written is not None and repos_named(written, linked) == target
     return (
         written is not None
         and re.search(rf"(?<!\w){re.escape(expected)}(?!\w)", written, re.IGNORECASE) is not None
