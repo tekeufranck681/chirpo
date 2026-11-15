@@ -15,7 +15,7 @@ Commands:
 /link owner/repo - connect a repo to this chat
 /issue [repo:] <title> - create an issue (in the default repo unless you name one)
 /members - who's here, their role and GitHub account
-/role @name admin|maintainer|member - change someone's role (admins)
+/role - your role here; /role @name admin|maintainer|member changes someone's (admins)
 /unlink owner/repo - disconnect a repo (admins)
 /context on|off - keep recent messages so I understand follow-ups (admins)
 /personality off|light|playful - how chatty I am (admins)
@@ -224,7 +224,11 @@ MEMBER_LINE = "- {name}{chat}: {role}, {github}"
 MEMBER_GITHUB = "GitHub {login}"  # no "@": Telegram would ping whoever has that username
 MEMBER_NOT_VERIFIED = "GitHub not linked yet"
 
-ROLE_USAGE = "Use: /role @name admin|maintainer|member"
+ROLE_USAGE = "Use: /role @name admin|maintainer|member (or /role alone to see yours)"
+ROLE_YOURS = "Your role here: {role}. An admin can change it with /role."
+ROLE_YOURS_ADMIN = (
+    "Your role here: admin. Change someone's with /role @name admin|maintainer|member."
+)
 MEMBER_NOT_FOUND = (
     "I don't know {name} here. They need to have talked to me in this chat "
     "(and done /iam if you use their GitHub name)."

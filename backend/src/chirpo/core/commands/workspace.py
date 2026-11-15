@@ -158,6 +158,13 @@ def _member_line(member: Member) -> str:
 
 async def role(request: Request) -> None:
     parts = request.args.split()
+    if not parts:  # "/role" alone: the sender's own role, for anyone
+        actor = await find_actor(request, no_workspace=messages.NO_REPO_LINKED)
+        if actor is not None:
+            own = actor.member.role
+            text = messages.ROLE_YOURS_ADMIN if own == Role.ADMIN else messages.ROLE_YOURS
+            await request.reply(text.format(role=own))
+        return
     new_role = _role(parts[1]) if len(parts) == 2 else None
     if new_role is None:
         await request.reply(messages.ROLE_USAGE)
