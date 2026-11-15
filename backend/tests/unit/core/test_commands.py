@@ -277,10 +277,22 @@ async def test_members_cannot_change_roles(world: World) -> None:
     )
 
 
-@pytest.mark.parametrize("text", ["/role", "/role @franck_tg", "/role @franck_tg boss"])
+@pytest.mark.parametrize("text", ["/role @franck_tg", "/role @franck_tg boss", "/role a b c"])
 async def test_role_usage(world: World, text: str) -> None:
     await linked_by_annie(world)
     assert await world.say(text) == messages.ROLE_USAGE
+
+
+async def test_role_alone_says_your_own_role(world: World) -> None:
+    await linked_by_annie(world)
+    assert await world.say("/role") == messages.ROLE_YOURS_ADMIN
+    await world.verified(FRANCK, FRANCK_GITHUB)
+    assert await world.say("/role", FRANCK) == messages.ROLE_YOURS.format(role="member")
+    assert world.audited() == []
+
+
+async def test_role_alone_needs_a_workspace(world: World) -> None:
+    assert await world.say("/role") == messages.NO_REPO_LINKED
 
 
 async def test_a_name_matching_several_people_is_refused(world: World) -> None:
