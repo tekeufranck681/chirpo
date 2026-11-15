@@ -27,6 +27,10 @@ Or just tell me what you need, mentioning me (in a private chat, just write):
 For now I show what I would do; confirming and running it comes soon."""
 
 UNKNOWN_COMMAND = "I don't know that command. Try /help."
+MENTION_HINT = (
+    'Yes? Tell me what you need, e.g. "{bot} the checkout crashes on Android". Or reply to a '
+    "message with just {bot} and I'll take it from there."
+)
 
 RATE_LIMITED_MEMBER = "That's a lot of requests in a short time. Try again in {wait}."
 RATE_LIMITED_TEAM = "This team has sent a lot of requests this hour. Try again in {wait}."

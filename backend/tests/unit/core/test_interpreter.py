@@ -98,7 +98,8 @@ class World:
     async def say(self, text: str, sender: ChatUser = FRANCK, **fields: object) -> str:
         self.messaging.sent.clear()
         fields.setdefault("sent_at", datetime.now(UTC))  # a message from just now, not 2026-01-01
-        message = make_message(text, sender=sender, mentions_bot=True, **fields)
+        fields.setdefault("mentions_bot", True)
+        message = make_message(text, sender=sender, **fields)
         await handle_inbound(message, self.messaging, self.services)
         return self.messaging.sent[-1][1] if self.messaging.sent else ""
 
@@ -547,7 +548,8 @@ async def test_a_photo_without_text_is_not_a_request() -> None:
     world = World([CHECKOUT])
     await world.linked()
     photo = Attachment(kind=AttachmentKind.IMAGE, file_id="P1", mime_type="image/jpeg")
-    assert await world.say("", attachments=(photo,)) == ""
+    # no caption, so no mention (a caption of just the mention is handled: test_bare_mention.py)
+    assert await world.say("", attachments=(photo,), mentions_bot=False) == ""
     assert world.llm.requests == []
     assert world.messaging.typing == []
 

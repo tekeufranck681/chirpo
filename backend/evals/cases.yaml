@@ -302,6 +302,14 @@ cases:
       - [{action: create_issue, repo: mobile, title_words: [notification, push]}]
       - [{action: ask_clarifying_question}]
 
+  - id: bare-mention-on-a-reply
+    category: context
+    from: franck
+    reply_to: m4
+    text: "Handle the message I'm replying to."  # what chirpo sends for a reply that is only "@chirpo"
+    expect:
+      - {action: create_issue, title_words: [avatar, profile]}
+
   - id: repo-kept-in-a-follow-up
     category: context
     from: franck

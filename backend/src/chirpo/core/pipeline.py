@@ -15,6 +15,10 @@ from chirpo.core.interpreter import interpret
 from chirpo.core.ports import MessagingAdapter, ProcessedEvents
 from chirpo.core.router import is_explicitly_addressed, parse_command
 
+# What a mention with no words asks for, in the sender's voice (sent to the model as their words)
+ON_REPLIED = "Handle the message I'm replying to."
+ON_ATTACHED = "Handle what I attached."
+
 
 async def handle_inbound(
     event: InboundEvent, messaging: MessagingAdapter, services: Services | None = None
@@ -25,7 +29,16 @@ async def handle_inbound(
     if event.sender.is_bot:
         return  # bots never trigger the bot (no loops)
     if not event.text.strip():
-        return  # media alone asks for nothing; the buffer still remembers it
+        if not event.mentions_bot:
+            return  # media alone asks for nothing; the buffer still remembers it
+        if not event.reply_to_message_id and not event.attachments:
+            hint = messages.MENTION_HINT.format(bot=messaging.bot_mention())
+            await messaging.send_message(event.chat, hint, reply_to=event.message_id)
+            return
+        # "@chirpo" alone on a reply or with a picture: deal with that. Our words stand in for
+        # the missing ones; what the buffer keeps is still the original (empty) message.
+        stand_in = ON_REPLIED if event.reply_to_message_id else ON_ATTACHED
+        event = event.model_copy(update={"text": stand_in})
     command = parse_command(event.text)
     if command is not None and (handler := COMMANDS.get(command.name)):
         await handler(Request(event, command.args, messaging, services))
