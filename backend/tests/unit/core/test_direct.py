@@ -424,3 +424,24 @@ async def test_if_the_result_can_not_be_stored_the_person_is_still_told_without_
     assert text.startswith('#2 "Add dark mode" is now')  # they know it happened
     assert world.messaging.buttons[world.messaging.last_id] == ()  # nothing to undo from
     assert issue_labels(world, 2) == ("status: review",)
+
+
+async def test_a_repo_named_by_part_of_its_name_asks_before_a_change() -> None:
+    from chirpo.core.domain import NewIssue
+
+    web = RepoRef.parse("github", "tekeufranck681/chirpo-web")
+    world = World(
+        [SetStatus(repo="web", issue=IssueRef(number=1), status="review")],
+        [SetStatus(repo="chirpo-web", issue=IssueRef(number=1), status="review")],
+    )
+    await ready(world)
+    workspace = await world.workspaces.for_chat(CHAT)
+    assert workspace is not None
+    await world.workspaces.link_repo(workspace.id, web)
+    world.codehost.permissions[(web.key, "tekeufranck681")] = RepoPermission.WRITE
+    await world.codehost.create_issue(web, NewIssue(title="Footer links broken"))
+    text = await world.say("move #1 in web to review")
+    assert text.startswith(messages.DRY_RUN_HEADER)  # "web" could mean a repo not linked here
+    assert world.codehost.issues[(web.key, 1)].labels == ()
+    text = await world.say("move #1 in chirpo-web to review")
+    assert world.codehost.issues[(web.key, 1)].labels == ("status: review",)

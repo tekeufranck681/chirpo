@@ -280,6 +280,37 @@ cases:
       - [{action: my_issues, state: closed}]
       - [{action: list_issues, people: [franck], state: closed}]
 
+  - id: repo-short-name-close
+    category: issue
+    from: annie
+    text: "close #4 in web, it's fixed"
+    expect:
+      - {action: close_issue, issue: 4, repo: web}
+
+  - id: repo-short-name-list
+    category: read
+    from: franck
+    text: "anything open on the web side?"
+    expect:
+      - {action: list_issues, repo: web}
+
+  - id: repo-not-linked
+    category: create
+    from: franck
+    text: "in the mobile repo: push notifications arrive twice"
+    any_of:  # passed on as said (code asks), or the model asks itself: never another repo
+      - [{action: create_issue, repo: mobile, title_words: [notification, push]}]
+      - [{action: ask_clarifying_question}]
+
+  - id: repo-kept-in-a-follow-up
+    category: context
+    from: franck
+    recent_extra:
+      - {from: franck, text: "@chirpo create an issue in the web repo"}
+    text: "a bug in payment processing: card payments fail at the last step"
+    expect:
+      - {action: create_issue, repo: web, title_words: [payment, card]}
+
   - id: read-other-repo
     category: read
     from: franck

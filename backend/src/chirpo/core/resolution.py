@@ -55,6 +55,7 @@ CURRENT_MILESTONE = frozenset(
     }
 )
 MAX_MILESTONES_NAMED = 5
+_REPO_FILLER = frozenset({"the", "repo", "repository", "project", "in", "our", "on", "of"})
 _IGNORED_WORDS = frozenset(
     {"the", "a", "an", "issue", "bug", "ticket", "one", "that", "this", "about", "with", "for",
      "on", "in", "of", "to", "and", "is", "it"}
@@ -76,6 +77,7 @@ class Resolved:
     notes: tuple[str, ...] = ()  # what was left out, e.g. labels the repo doesn't have
     ref: IssueRef | None = None  # how the model named the issue, before it became a number
     milestone: Milestone | None = None  # the sprint a list is limited to (M6.3)
+    loose_repo: bool = False  # the repo was found by part of its name: asked before changes
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,7 @@ class _Resolver:
         if not isinstance(proposal, RepoScoped):  # only questions aren't, handled above
             raise TypeError(f"can't resolve {type(proposal).__name__}")
         repo = await self._repo(proposal.repo)
+        loose = proposal.repo is not None and not exact_repo_name(proposal.repo, repo)
         update: dict[str, object] = {"repo": repo.full_name}
         notes: list[str] = []
         issue, ref, milestone = None, None, None
@@ -174,6 +177,7 @@ class _Resolver:
             notes=tuple(notes),
             ref=ref,
             milestone=milestone,
+            loose_repo=loose,
         )
 
     async def _milestone(self, repo: RepoRef, wanted: str) -> Milestone:
@@ -216,18 +220,15 @@ class _Resolver:
         if name is None:
             repo = self.team.default_repo
         else:
-            wanted = name.strip().casefold()
-            found = [
-                link.repo
-                for link in links
-                if wanted in (link.repo.full_name.casefold(), link.repo.name.casefold())
-            ]
+            found = repos_named(name, [link.repo for link in links])
             if not found:
                 repos = ", ".join(link.repo.full_name for link in links)
-                raise _Unclear(messages.REPO_NOT_LINKED.format(name=name, repos=repos))
+                shown_name = shown(name, MAX_NAME)
+                raise _Unclear(messages.REPO_NOT_LINKED.format(name=shown_name, repos=repos))
             if len(found) > 1:
                 options = ", ".join(repo.full_name for repo in found)
-                raise _Unclear(messages.REPO_AMBIGUOUS.format(name=name, options=options))
+                shown_name = shown(name, MAX_NAME)
+                raise _Unclear(messages.REPO_AMBIGUOUS.format(name=shown_name, options=options))
             repo = found[0]
         if repo.key not in self._readable:
             if not await self.can_read(repo):
@@ -337,6 +338,38 @@ class _Resolver:
 
 class _NotAllowed(Exception):
     """The sender may not read a repo the request names; they were already told why."""
+
+
+def repos_named(said: str, repos: Sequence[RepoRef]) -> list[RepoRef]:
+    """The linked repos `said` names (M6.6), most exact first: the full name, the repo name
+    ("chirpo-web"), its words ("chirpo web"), then a part of it ("web", "the web repo"). The
+    first step that finds any decides; several found are for the caller to ask about."""
+    for step in (0, 1, 2):
+        if found := [repo for repo in repos if _exact_step(step, said, repo)]:
+            return found
+    meaningful = {word for word in _repo_words(said) if word not in _REPO_FILLER}
+    if not any(len(word) > 1 and not word.isdigit() for word in meaningful):
+        return []  # "2" or "a" alone names nothing; "sandbox 2" does
+    return [repo for repo in repos if meaningful <= set(_repo_words(repo.name))]
+
+
+def exact_repo_name(said: str, repo: RepoRef) -> bool:
+    """Whether `said` names `repo` exactly (full name, name, or the name's words), not by a part
+    of it; a part can mean a repo that isn't linked, so a change then asks first."""
+    return any(_exact_step(step, said, repo) for step in (0, 1, 2))
+
+
+def _exact_step(step: int, said: str, repo: RepoRef) -> bool:
+    wanted = said.strip().casefold()
+    if step == 0:
+        return repo.full_name.casefold() == wanted
+    if step == 1:
+        return repo.name.casefold() == wanted
+    return _repo_words(repo.name) == _repo_words(wanted)
+
+
+def _repo_words(name: str) -> list[str]:
+    return [word for word in re.split(r"[\s\-_./]+", name.casefold()) if word]
 
 
 def _revalidated[P: Proposal](proposal: P, update: dict[str, object]) -> P:

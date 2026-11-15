@@ -348,6 +348,27 @@ async def test_issue_is_created_in_the_default_repo_with_the_requester(world: Wo
     assert world.audit.entries[0].payload["number"] == number
 
 
+async def test_issue_in_another_linked_repo(world: World) -> None:
+    await linked_by_annie(world)
+    world.github_access("annie-gh", OTHER, RepoPermission.ADMIN)
+    await world.say("/link tekeufranck681/chirpo")
+    await world.say("/issue chirpo: Footer links broken")
+    (repo_key, _), created = next(iter(world.codehost.issues.items()))
+    assert (repo_key, created.title) == (OTHER.key, "Footer links broken")
+
+
+async def test_a_colon_that_names_no_repo_stays_in_the_title(world: World) -> None:
+    await linked_by_annie(world)
+    await world.say("/issue Crash: checkout on Android")
+    (repo_key, _), created = next(iter(world.codehost.issues.items()))
+    assert (repo_key, created.title) == (SANDBOX.key, "Crash: checkout on Android")
+
+
+async def test_a_repo_without_a_title_shows_the_usage(world: World) -> None:
+    await linked_by_annie(world)
+    assert await world.say("/issue chirpo-sandbox:") == messages.ISSUE_USAGE
+
+
 async def test_issue_needs_a_linked_repo(world: World) -> None:
     assert await world.say("/issue Login button broken") == messages.NO_REPO_LINKED
     await world.verified()
