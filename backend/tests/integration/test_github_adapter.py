@@ -766,6 +766,30 @@ async def test_a_file_is_proposed_on_its_own_branch_as_a_pull_request(
     assert sent(pr)["base"] == "main" and sent(pr)["head"] == "chirpo/pr-template"
 
 
+async def test_an_empty_repo_is_told_apart(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from chirpo.core.domain import FileProposal
+    from chirpo.core.errors import CodeHostEmptyRepoError
+
+    github.get(REPO_API).respond(json={"default_branch": "main"})
+    github.get(f"{REPO_API}/git/ref/heads/main").respond(
+        409, json={"message": "Git Repository is empty."}
+    )
+    branch = github.post(f"{REPO_API}/git/refs")
+    proposal = FileProposal(
+        branch="chirpo/pr-template",
+        path="x.md",
+        content="",
+        commit_message="m",
+        title="t",
+        body="b",
+    )
+    with pytest.raises(CodeHostEmptyRepoError):
+        await adapter.propose_file(REPO, proposal)
+    assert not branch.called
+
+
 async def test_asking_twice_returns_the_open_proposal(
     adapter: GitHubAdapter, github: respx.MockRouter
 ) -> None:

@@ -112,6 +112,16 @@ def test_reply_to_the_bot(adapter: TelegramAdapter) -> None:
     assert not message.mentions_bot
     replied = load("reply_to_bot")["message"]["reply_to_message"]["message_id"]
     assert message.reply_to_message_id == str(replied)
+    assert message.reply_to_text == "Created issue #87"
+
+
+def test_a_replied_photo_brings_its_caption_or_nothing(adapter: TelegramAdapter) -> None:
+    assert parse_message(adapter, "reply_to_photo").reply_to_text == ""
+    raw = load("reply_to_photo")
+    raw["message"]["reply_to_message"]["caption"] = "## What changed"
+    parsed = adapter.parse_update(raw)
+    assert isinstance(parsed, InboundMessage)
+    assert parsed.reply_to_text == "## What changed"
 
 
 def test_plain_group_message(adapter: TelegramAdapter) -> None:

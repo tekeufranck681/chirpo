@@ -63,6 +63,10 @@ class CodeHostConflictError(CodeHostError):
     """The action conflicts with the current state, e.g. merging a closed or draft PR."""
 
 
+class CodeHostEmptyRepoError(CodeHostConflictError):
+    """The repo has no commit yet, so there is no branch to start a pull request from."""
+
+
 class CodeHostRateLimitedError(CodeHostError):
     def __init__(self, retry_after_seconds: float) -> None:
         super().__init__(f"rate limited, retry after {retry_after_seconds} s")

@@ -88,6 +88,7 @@ class InboundMessage(BaseModel):
     attachments: tuple[Attachment, ...] = ()
     # What the replied-to message carries: the platform sends it along, so it needs no buffer.
     reply_to_attachments: tuple[Attachment, ...] = ()
+    reply_to_text: str = ""  # its text or caption, e.g. a template pasted for /templates pr
     is_private_chat: bool = False
 
 

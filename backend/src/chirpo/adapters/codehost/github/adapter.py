@@ -41,6 +41,8 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import (
+    CodeHostConflictError,
+    CodeHostEmptyRepoError,
     CodeHostError,
     CodeHostForbiddenError,
     CodeHostNotFoundError,
@@ -477,13 +479,16 @@ class GitHubAdapter:
             lambda gh: gh.arequest("GET", f"/repos/{repo.owner}/{repo.name}"),
         )
         base = info["default_branch"]
-        head = await self._json(
-            repo,
-            "read the default branch",
-            lambda gh: gh.arequest(
-                "GET", f"/repos/{repo.owner}/{repo.name}/git/ref/heads/{quote(base, safe='/')}"
-            ),
-        )
+        try:
+            head = await self._json(
+                repo,
+                "read the default branch",
+                lambda gh: gh.arequest(
+                    "GET", f"/repos/{repo.owner}/{repo.name}/git/ref/heads/{quote(base, safe='/')}"
+                ),
+            )
+        except CodeHostConflictError as error:  # GitHub's 409 here: "Git Repository is empty."
+            raise CodeHostEmptyRepoError(f"{repo.full_name} has no commit yet") from error
         api = f"/repos/{repo.owner}/{repo.name}"
         new_branch = True
         try:
