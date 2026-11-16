@@ -601,6 +601,10 @@ class FakeCodeHost:
             if key == repo.key
             and state_matches(pull)
             and (query.author is None or same_login(query.author, pull.author or ""))
+            and (
+                query.updated_since is None
+                or (pull.updated_at is not None and pull.updated_at >= query.updated_since)
+            )
         ]
         return found[: query.limit]
 

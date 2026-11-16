@@ -8,6 +8,9 @@ fragment PullRequestFields on PullRequest {
   state
   isDraft
   url
+  createdAt
+  updatedAt
+  mergedAt
   mergeable
   headRefName
   baseRefName
@@ -32,11 +35,14 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 LIST_PULL_REQUESTS = (
     """
-query($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String) {
+query(
+  $owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String,
+  $order: IssueOrderField!
+) {
   repository(owner: $owner, name: $name) {
     pullRequests(
       states: $states, first: $first, after: $after,
-      orderBy: {field: CREATED_AT, direction: DESC}
+      orderBy: {field: $order, direction: DESC}
     ) {
       nodes { ...PullRequestFields }
       pageInfo { hasNextPage endCursor }

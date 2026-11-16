@@ -447,8 +447,10 @@ CATCH_UP_NO_OWN_MESSAGE = (
 )
 CATCH_UP_CUT = "(Only the last {count} messages are covered.)"
 CATCH_UP_CUT_CHARS = "(A long conversation: only the most recent messages are covered.)"
-CATCH_UP_OPENED = "{repo}: opened {issues}"
-CATCH_UP_CLOSED = "{repo}: closed {issues}"
+CATCH_UP_OPENED = "{repo}: opened issue {issues}"
+CATCH_UP_CLOSED = "{repo}: closed issue {issues}"
+CATCH_UP_PRS_OPENED = "{repo}: opened PR {pulls}"
+CATCH_UP_PRS_MERGED = "{repo}: merged PR {pulls}"
 CATCH_UP_NO_SUMMARY = "I couldn't sum up the messages this time. Try again in a moment."
 CATCH_UP_NEEDS_CONTEXT = (
     "I can only catch you up when I keep recent messages, and this chat has that off. An admin "

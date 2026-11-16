@@ -17,7 +17,7 @@ from chirpo.core.llm import catch_up_request
 from chirpo.core.outbound import plain_lines
 from chirpo.core.permissions import Action
 from chirpo.core.ports import LLMProvider
-from chirpo.core.summary import changes_since, named
+from chirpo.core.summary import changes_since, named, named_pulls, pull_changes_since
 
 log = logging.getLogger(__name__)
 
@@ -132,14 +132,23 @@ async def _issue_changes(actor: Actor, repos: Sequence[RepoRef], since: datetime
             verdict = await actor.services.permissions.check(actor.member, Action.VIEW, repo)
             if not verdict.allowed:
                 continue
-            opened, closed, _ = await changes_since(repo, actor.services.codehost, since)
+            codehost = actor.services.codehost
+            opened, closed, _ = await changes_since(repo, codehost, since)
+            new_pulls, merged = await pull_changes_since(repo, codehost, since)
         except CodeHostError as error:
             log.warning("catch_up_repo_unavailable error=%s", type(error).__name__)
             continue
+        name = repo.full_name
         if opened:
-            lines.append(messages.CATCH_UP_OPENED.format(repo=repo.full_name, issues=named(opened)))
+            lines.append(messages.CATCH_UP_OPENED.format(repo=name, issues=named(opened)))
         if closed:
-            lines.append(messages.CATCH_UP_CLOSED.format(repo=repo.full_name, issues=named(closed)))
+            lines.append(messages.CATCH_UP_CLOSED.format(repo=name, issues=named(closed)))
+        if new_pulls:
+            lines.append(
+                messages.CATCH_UP_PRS_OPENED.format(repo=name, pulls=named_pulls(new_pulls))
+            )
+        if merged:
+            lines.append(messages.CATCH_UP_PRS_MERGED.format(repo=name, pulls=named_pulls(merged)))
     return lines
 
 

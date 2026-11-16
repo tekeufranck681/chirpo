@@ -117,6 +117,14 @@ def _iso(moment: datetime) -> Any:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _before(pull: PullRequest, since: datetime) -> bool:
+    return pull.updated_at is not None and pull.updated_at < since
+
+
+def _when(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
 def _to_pull_request(repo: RepoRef, node: dict[str, Any]) -> PullRequest:
     commits = node["commits"]["nodes"]
     rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
@@ -141,6 +149,9 @@ def _to_pull_request(repo: RepoRef, node: dict[str, Any]) -> PullRequest:
         base_branch=node["baseRefName"],
         url=node["url"],
         draft=node["isDraft"],
+        created_at=_when(node.get("createdAt")),
+        updated_at=_when(node.get("updatedAt")),
+        merged_at=_when(node.get("mergedAt")),
         mergeable=_MERGEABLE.get(node["mergeable"]),
         checks=checks,
         body=node.get("body") or "",
@@ -409,8 +420,9 @@ class GitHubAdapter:
         return RepoPermission.NONE
 
     async def list_pull_requests(self, repo: RepoRef, query: PullRequestQuery) -> list[PullRequest]:
-        # GitHub can't filter PRs by author here, so with an author we read full pages and filter.
-        page_size = PAGE_SIZE if query.author else query.limit
+        # GitHub can't filter PRs by author or date here, so then we read full pages and filter.
+        since = query.updated_since
+        page_size = PAGE_SIZE if query.author or since else query.limit
         pulls: list[PullRequest] = []
         after: str | None = None
         for _ in range(MAX_PULL_REQUEST_PAGES):
@@ -422,15 +434,19 @@ class GitHubAdapter:
                     states=_PULL_REQUEST_STATES[query.state],
                     first=page_size,
                     after=after,
+                    order="UPDATED_AT" if since else "CREATED_AT",
                 )
             )["pullRequests"]
+            page = [_to_pull_request(repo, node) for node in found["nodes"]]
+            older = since is not None and any(_before(pull, since) for pull in page)
             pulls += [
                 pull
-                for pull in (_to_pull_request(repo, node) for node in found["nodes"])
-                if query.author is None or same_login(query.author, pull.author or "")
+                for pull in page
+                if (query.author is None or same_login(query.author, pull.author or ""))
+                and (since is None or not _before(pull, since))
             ]
-            if len(pulls) >= query.limit or not found["pageInfo"]["hasNextPage"]:
-                break
+            if len(pulls) >= query.limit or older or not found["pageInfo"]["hasNextPage"]:
+                break  # newest change first: once one is older, the rest are too
             after = found["pageInfo"]["endCursor"]
         else:
             log.warning("pull_request_list_truncated", repo=repo.full_name)

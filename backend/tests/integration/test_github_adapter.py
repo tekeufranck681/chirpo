@@ -478,7 +478,24 @@ async def test_list_pull_requests_sends_states(
         "states": states,
         "first": 3,
         "after": None,
+        "order": "CREATED_AT",
     }
+
+
+async def test_recent_pull_requests_are_read_by_last_update(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from datetime import UTC, datetime
+
+    route = github.post(GRAPHQL).respond(json=payload("graphql_pull_requests"))
+    since = datetime(2026, 11, 15, tzinfo=UTC)
+    pulls = await adapter.list_pull_requests(
+        REPO, PullRequestQuery(state="all", limit=10, updated_since=since)
+    )
+    assert [pull.number for pull in pulls] == [12]  # #11 and #10 changed before
+    assert pulls[0].merged_at == datetime(2026, 11, 16, 10, tzinfo=UTC)
+    assert pulls[0].created_at == datetime(2026, 11, 15, 9, tzinfo=UTC)
+    assert graphql_variables(route)["order"] == "UPDATED_AT"
 
 
 async def test_list_pull_requests_by_author_reads_more_pages(

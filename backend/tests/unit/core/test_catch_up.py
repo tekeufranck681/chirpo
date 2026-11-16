@@ -226,3 +226,42 @@ async def test_times_follow_the_teams_timezone() -> None:
     local = (NOW - timedelta(minutes=1)).astimezone(ZoneInfo("Africa/Douala"))
     assert f"[{local:%H:%M}] Annie Ngo:" in summarized(world)
     assert "UTC" not in reply
+
+
+async def test_pull_requests_opened_and_merged_since_then_are_listed() -> None:
+    from chirpo.core.domain import PullRequestState
+
+    world = await team([CatchUp()])
+    world.llm.summaries.append("• ok")
+    fresh = NOW - timedelta(minutes=20)
+    world.codehost.add_pull_request(
+        SANDBOX, title="Dark mode toggle", created_at=fresh, updated_at=fresh
+    )
+    world.codehost.add_pull_request(
+        SANDBOX,
+        title="Update README",
+        state=PullRequestState.MERGED,
+        created_at=NOW - timedelta(days=2),
+        updated_at=fresh,
+        merged_at=fresh,
+    )
+    world.codehost.add_pull_request(
+        SANDBOX,
+        title="Old work",
+        created_at=NOW - timedelta(days=3),
+        updated_at=NOW - timedelta(days=3),
+    )
+    reply = await world.say("what did I miss?")
+    assert messages.CATCH_UP_PRS_OPENED.split("{")[0] in reply
+    assert "PR #" in reply and '"Dark mode toggle"' in reply
+    assert '"Update README"' in reply and "merged" in reply
+    assert "Old work" not in reply
+
+
+def test_the_summary_ranks_what_matters_and_keeps_your_own_commitments() -> None:
+    from chirpo.core.llm import catch_up_request
+
+    rules = catch_up_request(["[10:00] Annie: hi"], "Franck", marker="m").instructions
+    assert "You said" in rules  # the asker's own commitments, in the second person
+    assert "Decisions" in rules and "Blockers" in rules
+    assert "number" in rules  # PRs and issues named by number when the messages give one

@@ -244,6 +244,24 @@ async def changes_since(
     return opened, closed, len(recent) >= MAX_LISTED
 
 
+async def pull_changes_since(
+    repo: RepoRef, codehost: CodeHostAdapter, since: datetime
+) -> tuple[list[PullRequest], list[PullRequest]]:
+    """Pull requests opened and merged since then (M6.9)."""
+    query = PullRequestQuery(state="all", limit=MAX_LISTED, updated_since=since)
+    changed = await codehost.list_pull_requests(repo, query)
+    opened = [p for p in changed if p.created_at is not None and p.created_at >= since]
+    merged = [p for p in changed if p.merged_at is not None and p.merged_at >= since]
+    return sorted(opened, key=lambda p: p.number), sorted(merged, key=lambda p: p.number)
+
+
+def named_pulls(pulls: Sequence[PullRequest]) -> str:
+    text = ", ".join(f'#{p.number} "{shown(p.title, MAX_TITLE)}"' for p in pulls[:MAX_NEW])
+    if len(pulls) > MAX_NEW:
+        text += messages.SUMMARY_MORE.format(count=len(pulls) - MAX_NEW)
+    return text
+
+
 def named(issues: Sequence[Issue]) -> str:
     named = ", ".join(f'#{i.number} "{shown(i.title, MAX_TITLE)}"' for i in issues[:MAX_NEW])
     if len(issues) > MAX_NEW:
