@@ -53,6 +53,22 @@ class Interpretation:
     output_tokens: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class SummaryRequest:
+    """Plain text asked for, no tools (M6.9)."""
+
+    instructions: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class Summary:
+    text: str
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 SMALL_TALK = "small_talk"
 # prompts/<name>.md, in the order they are inserted
 SECTIONS = ("images", "proposal", "smalltalk", "playful", "language")
@@ -149,6 +165,21 @@ def interpret_request(
         message="\n\n".join(blocks),
         tools=tuple(tool for tool in tool_specs() if tool.name not in left_out),
         images=tuple(images),
+    )
+
+
+def catch_up_request(
+    lines: Sequence[str], asker: str, *, marker: str | None = None
+) -> SummaryRequest:
+    """`lines`: the chat's messages, one per line, already cleaned (core/context.py). They and
+    the asker's name are outside text, so they go in untrusted blocks, never in the rules."""
+    marker = marker or secrets.token_hex(8)
+    prompt = files("chirpo.core").joinpath("prompts", "catchup.md").read_text(encoding="utf-8")
+    chat = _untrusted("chat_messages", "\n".join(lines), marker)  # sized by the caller
+    asking = _untrusted("asked_by", _sender(asker), marker)
+    return SummaryRequest(
+        instructions=f"{prompt.strip()}\n\nThis request's marker is `{marker}`.",
+        message=f"{asking}\n\n{chat}",
     )
 
 

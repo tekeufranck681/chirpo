@@ -28,7 +28,7 @@ from chirpo.core.errors import (
     LLMSetupError,
     LLMUnavailableError,
 )
-from chirpo.core.llm import Interpretation, InterpretRequest
+from chirpo.core.llm import Interpretation, InterpretRequest, Summary, SummaryRequest
 from chirpo.core.tools import parse_tool_call
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -71,6 +71,22 @@ class GeminiProvider:
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
         return self._interpretation(await self._post(_body(request, self.thinking)))
+
+    async def summarize(self, request: SummaryRequest) -> Summary:
+        body: dict[str, Any] = {
+            "systemInstruction": {"parts": [{"text": request.instructions}]},
+            "contents": [{"role": "user", "parts": [{"text": request.message}]}],
+            "generationConfig": _config(self.thinking),
+        }
+        data = await self._post(body)
+        parts = _list(_dict(self._candidate(data).get("content")).get("parts"))
+        text = "".join(
+            part["text"]
+            for part in map(_dict, parts)
+            if isinstance(part.get("text"), str) and not part.get("thought")
+        )
+        model, tokens_in, tokens_out = self._usage(data)
+        return Summary(text, model, tokens_in, tokens_out)
 
     async def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(len(RETRY_DELAYS) + 1):
@@ -122,6 +138,12 @@ class GeminiProvider:
         return LLMSetupError(f"Gemini rejected the request ({code})", detail=detail)
 
     def _interpretation(self, data: dict[str, Any]) -> Interpretation:
+        proposals = _proposals(self._candidate(data))
+        model, tokens_in, tokens_out = self._usage(data)
+        return Interpretation(proposals, model, tokens_in, tokens_out)
+
+    def _candidate(self, data: dict[str, Any]) -> dict[str, Any]:
+        """The first answer, once it is known to be complete and not blocked."""
         blocked = _dict(data.get("promptFeedback")).get("blockReason")
         if blocked:
             raise LLMRefusedError(_brief(blocked))
@@ -134,14 +156,13 @@ class GeminiProvider:
             raise LLMRefusedError(finish)
         if finish != "STOP":
             raise LLMInvalidOutputError((finish.lower(),))
+        return candidate
+
+    def _usage(self, data: dict[str, Any]) -> tuple[str, int, int]:
         usage = _dict(data.get("usageMetadata"))
-        return Interpretation(
-            proposals=_proposals(candidate),
-            model=_brief(data.get("modelVersion")) or self.model,
-            input_tokens=_count(usage.get("promptTokenCount")),
-            output_tokens=_count(usage.get("candidatesTokenCount"))
-            + _count(usage.get("thoughtsTokenCount")),
-        )
+        output = _count(usage.get("candidatesTokenCount")) + _count(usage.get("thoughtsTokenCount"))
+        model = _brief(data.get("modelVersion")) or self.model
+        return model, _count(usage.get("promptTokenCount")), output
 
 
 def _body(request: InterpretRequest, thinking: str | None) -> dict[str, Any]:
@@ -153,9 +174,7 @@ def _body(request: InterpretRequest, thinking: str | None) -> dict[str, Any]:
         }
         for tool in request.tools
     ]
-    config: dict[str, Any] = {"maxOutputTokens": MAX_OUTPUT_TOKENS}
-    if thinking is not None:
-        config["thinkingConfig"] = {"thinkingLevel": thinking}
+    config = _config(thinking)
     # Google advises images before the text that asks about them.
     parts: list[dict[str, Any]] = []
     for image in request.images:
@@ -170,6 +189,13 @@ def _body(request: InterpretRequest, thinking: str | None) -> dict[str, Any]:
         "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
         "generationConfig": config,
     }
+
+
+def _config(thinking: str | None) -> dict[str, Any]:
+    config: dict[str, Any] = {"maxOutputTokens": MAX_OUTPUT_TOKENS}
+    if thinking is not None:
+        config["thinkingConfig"] = {"thinkingLevel": thinking}
+    return config
 
 
 def _proposals(candidate: dict[str, Any]) -> tuple[Proposal, ...]:

@@ -11,12 +11,12 @@ person presses Confirm (core/confirmation.py).
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from chirpo.core import messages
-from chirpo.core.actions import SmallTalk, permission_of, spec_of
+from chirpo.core.actions import CatchUp, NotARequest, SmallTalk, permission_of, spec_of
+from chirpo.core.catchup import catch_up
 from chirpo.core.commands.base import (
     Actor,
     Request,
@@ -26,6 +26,7 @@ from chirpo.core.commands.base import (
     find_actor,
     limited,
     needs_services,
+    typing_shown,
 )
 from chirpo.core.confirmation import may_decide, propose
 from chirpo.core.context import (
@@ -45,7 +46,6 @@ from chirpo.core.errors import (
     LLMInvalidOutputError,
     LLMRateLimitedError,
     LLMRefusedError,
-    MessagingError,
 )
 from chirpo.core.listing import is_read, run_read
 from chirpo.core.llm import Interpretation, RequestImage
@@ -62,7 +62,6 @@ from chirpo.core.workspaces import LinkedRepo, Personality
 MAX_SMALL_TALK = 280  # characters of a small talk reply, before escaping
 
 RECENT_MESSAGES = 20
-TYPING_REFRESH_SECONDS = 4.0  # Telegram shows "typing…" for 5 seconds per request
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ async def interpret(request: Request) -> None:
     # Nothing of a repo is read, sent to the model or quoted back before this check.
     if not await allowed(request, actor, Action.VIEW, default):
         return
-    async with _typing(request):
+    async with typing_shown(request):
         await _answer(request, actor, services.llm, repos, card)
 
 
@@ -230,6 +229,12 @@ async def _answer_timed(
     if asked.failed:  # the model wanted an image that couldn't be fetched
         await request.reply("\n".join(notes) or messages.IMAGE_UNAVAILABLE)
         return
+    catching_up = [p for p in interpretation.proposals if isinstance(p, CatchUp)]
+    if catching_up:  # a summary, not a step: answered first, the rest goes on as usual
+        await catch_up(request, actor, llm, [r.repo for r in repos], hours=catching_up[0].hours)
+        rest = [p for p in interpretation.proposals if not isinstance(p, CatchUp | NotARequest)]
+        if not [p for p in rest if not isinstance(p, SmallTalk)]:
+            return
 
     async def can_read(repo: RepoRef) -> bool:
         return await allowed(request, actor, Action.VIEW, repo)
@@ -289,33 +294,6 @@ async def _answer_timed(
             notes = [*notes, messages.STALE_NOTE]  # the worker was away: don't act on old words
         await propose(request, actor.member, services, changes, default, notes, replacing)
     timer.lap("reply")
-
-
-@asynccontextmanager
-async def _typing(request: Request) -> AsyncIterator[None]:
-    """Keeps "typing…" on screen until the reply is sent: chat apps drop it after ~5 seconds,
-    while the model can take 10-20, and a silent bot looks broken."""
-    messaging, chat = request.messaging, request.message.chat
-
-    async def show() -> None:
-        try:
-            await messaging.show_typing(chat)
-        except MessagingError as error:  # only a courtesy, but say why it's missing
-            log.info("typing_failed error=%s", type(error).__name__)
-
-    async def keep_typing() -> None:
-        while True:
-            await asyncio.sleep(TYPING_REFRESH_SECONDS)
-            await show()
-
-    await show()  # right away, not when the loop first gets a turn
-    task = asyncio.create_task(keep_typing())
-    try:
-        yield
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
 
 
 def _charger(services: Services, actor: Actor) -> Charge:

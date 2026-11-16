@@ -45,7 +45,13 @@ from chirpo.core.errors import (
     LastAdminError,
     MessagingForbiddenError,
 )
-from chirpo.core.llm import MAX_MESSAGE_CHARS, Interpretation, InterpretRequest
+from chirpo.core.llm import (
+    MAX_MESSAGE_CHARS,
+    Interpretation,
+    InterpretRequest,
+    Summary,
+    SummaryRequest,
+)
 from chirpo.core.pending import FINISHED, RUNNING, PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role, role_change_refusal
 from chirpo.core.statuses import StatusLabels
@@ -312,6 +318,8 @@ class FakeLLM:
         self.tokens = tokens  # (in, out) reported with every answer
         self.requests: list[InterpretRequest] = []
         self.delay = delay  # seconds the "model" takes to answer
+        self.summaries: list[str | Exception] = []  # answers to summarize, in order
+        self.summary_requests: list[SummaryRequest] = []
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
         self.requests.append(request)
@@ -321,6 +329,13 @@ class FakeLLM:
         if isinstance(answer, Exception):
             raise answer
         return Interpretation(tuple(answer), self.model, *self.tokens)
+
+    async def summarize(self, request: SummaryRequest) -> Summary:
+        self.summary_requests.append(request)
+        text = self.summaries.pop(0)
+        if isinstance(text, Exception):
+            raise text
+        return Summary(text, self.model, *self.tokens)
 
 
 class FakeMessageBuffer:
@@ -586,6 +601,10 @@ class FakeCodeHost:
             if key == repo.key
             and state_matches(pull)
             and (query.author is None or same_login(query.author, pull.author or ""))
+            and (
+                query.updated_since is None
+                or (pull.updated_at is not None and pull.updated_at >= query.updated_since)
+            )
         ]
         return found[: query.limit]
 

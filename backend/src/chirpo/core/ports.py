@@ -29,7 +29,7 @@ from chirpo.core.domain import (
     RepoRef,
     SentMessage,
 )
-from chirpo.core.llm import Interpretation, InterpretRequest
+from chirpo.core.llm import Interpretation, InterpretRequest, Summary, SummaryRequest
 from chirpo.core.pending import PendingAction, PendingStatus, Step
 from chirpo.core.permissions import Role
 from chirpo.core.statuses import StatusLabels
@@ -291,6 +291,10 @@ class LLMProvider(Protocol):
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
         """Proposals for the message, validated against the action models. Raises `LLMError`s."""
+        ...
+
+    async def summarize(self, request: SummaryRequest) -> Summary:
+        """Plain text for the request, no tools (M6.9). Raises `LLMError`s."""
         ...
 
 

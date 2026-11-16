@@ -13,7 +13,11 @@
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-issues",
             "baseRefName": "main",
-            "baseRepository": {"defaultBranchRef": {"name": "main"}},
+            "baseRepository": {
+              "defaultBranchRef": {
+                "name": "main"
+              }
+            },
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"
@@ -34,7 +38,10 @@
             },
             "closingIssuesReferences": {
               "nodes": []
-            }
+            },
+            "createdAt": "2026-11-15T09:00:00Z",
+            "updatedAt": "2026-11-16T10:00:00Z",
+            "mergedAt": "2026-11-16T10:00:00Z"
           },
           {
             "number": 11,
@@ -46,7 +53,11 @@
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-auth",
             "baseRefName": "main",
-            "baseRepository": {"defaultBranchRef": {"name": "main"}},
+            "baseRepository": {
+              "defaultBranchRef": {
+                "name": "main"
+              }
+            },
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"
@@ -67,7 +78,10 @@
             },
             "closingIssuesReferences": {
               "nodes": []
-            }
+            },
+            "createdAt": "2026-11-12T09:00:00Z",
+            "updatedAt": "2026-11-14T08:00:00Z",
+            "mergedAt": "2026-11-14T08:00:00Z"
           },
           {
             "number": 10,
@@ -79,7 +93,11 @@
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-core",
             "baseRefName": "main",
-            "baseRepository": {"defaultBranchRef": {"name": "main"}},
+            "baseRepository": {
+              "defaultBranchRef": {
+                "name": "main"
+              }
+            },
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"
@@ -100,7 +118,10 @@
             },
             "closingIssuesReferences": {
               "nodes": []
-            }
+            },
+            "createdAt": "2026-11-08T09:00:00Z",
+            "updatedAt": "2026-11-10T08:00:00Z",
+            "mergedAt": "2026-11-10T08:00:00Z"
           }
         ],
         "pageInfo": {

@@ -197,17 +197,13 @@ async def _part(
     day: str,
     when: str,
 ) -> str:
-    recent, open_now, milestones, pulls = await asyncio.gather(
-        codehost.list_issues(repo, IssueQuery(state="all", since=since, limit=MAX_LISTED)),
+    (opened, closed, busy), open_now, milestones, pulls = await asyncio.gather(
+        changes_since(repo, codehost, since),
         codehost.list_issues(repo, IssueQuery(limit=MAX_LISTED)),
         codehost.list_milestones(repo),
         codehost.list_pull_requests(repo, PullRequestQuery(limit=MAX_LISTED)),
     )
-    opened = sorted((i for i in recent if i.created_at >= since), key=lambda i: i.number)
-    closed = [
-        i for i in recent if i.state == IssueState.CLOSED and i.closed_at and i.closed_at >= since
-    ]
-    more = "+" if len(recent) >= MAX_LISTED else ""  # a very busy day: only the newest were read
+    more = "+" if busy else ""
     lines = [messages.SUMMARY_HEADING.format(repo=repo.full_name, day=day)]
     if opened or closed:
         lines.append(
@@ -216,7 +212,7 @@ async def _part(
             )
         )
         if opened:
-            lines.append(messages.SUMMARY_NEW.format(issues=_named(opened)))
+            lines.append(messages.SUMMARY_NEW.format(issues=named(opened)))
     else:
         lines.append(messages.SUMMARY_QUIET.format(when=when))
     capped = "+" if len(open_now) >= MAX_LISTED else ""
@@ -233,7 +229,40 @@ async def _part(
     return "\n".join(lines)
 
 
-def _named(issues: Sequence[Issue]) -> str:
+async def changes_since(
+    repo: RepoRef, codehost: CodeHostAdapter, since: datetime
+) -> tuple[list[Issue], list[Issue], bool]:
+    """Issues opened and closed since then, and whether it was so busy that only the newest
+    were read."""
+    recent = await codehost.list_issues(
+        repo, IssueQuery(state="all", since=since, limit=MAX_LISTED)
+    )
+    opened = sorted((i for i in recent if i.created_at >= since), key=lambda i: i.number)
+    closed = [
+        i for i in recent if i.state == IssueState.CLOSED and i.closed_at and i.closed_at >= since
+    ]
+    return opened, closed, len(recent) >= MAX_LISTED
+
+
+async def pull_changes_since(
+    repo: RepoRef, codehost: CodeHostAdapter, since: datetime
+) -> tuple[list[PullRequest], list[PullRequest]]:
+    """Pull requests opened and merged since then (M6.9)."""
+    query = PullRequestQuery(state="all", limit=MAX_LISTED, updated_since=since)
+    changed = await codehost.list_pull_requests(repo, query)
+    opened = [p for p in changed if p.created_at is not None and p.created_at >= since]
+    merged = [p for p in changed if p.merged_at is not None and p.merged_at >= since]
+    return sorted(opened, key=lambda p: p.number), sorted(merged, key=lambda p: p.number)
+
+
+def named_pulls(pulls: Sequence[PullRequest]) -> str:
+    text = ", ".join(f'#{p.number} "{shown(p.title, MAX_TITLE)}"' for p in pulls[:MAX_NEW])
+    if len(pulls) > MAX_NEW:
+        text += messages.SUMMARY_MORE.format(count=len(pulls) - MAX_NEW)
+    return text
+
+
+def named(issues: Sequence[Issue]) -> str:
     named = ", ".join(f'#{i.number} "{shown(i.title, MAX_TITLE)}"' for i in issues[:MAX_NEW])
     if len(issues) > MAX_NEW:
         named += messages.SUMMARY_MORE.format(count=len(issues) - MAX_NEW)

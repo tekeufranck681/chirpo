@@ -55,6 +55,7 @@ _CHECKS = frozenset(
         "milestone",
         "pull_request",
         "issue_repo",
+        "hours",
     }
 )
 
@@ -310,6 +311,8 @@ def _check(step: Step, proposal: Proposal, case: Case, fx: Fixture) -> list[str]
         problems.append(
             f"{name}: issue repo {values.get('issue_repo')!r}, expected {step['issue_repo']!r}"
         )
+    if "hours" in step and values.get("hours") != step["hours"]:
+        problems.append(f"{name}: hours {values.get('hours')}, expected {step['hours']}")
     if "state" in step and values["state"] != step["state"]:
         problems.append(f"{name}: state {values['state']}, expected {step['state']}")
     if "title_words" in step and not _has_word(_titles(values), step["title_words"]):

@@ -299,9 +299,9 @@ async def test_github_trouble_is_said_and_raised_for_the_logs() -> None:
 async def test_typing_is_kept_up_while_the_model_thinks(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
-    from chirpo.core import interpreter
+    from chirpo.core.commands import base as commands_base
 
-    monkeypatch.setattr(interpreter, "TYPING_REFRESH_SECONDS", 0.01)
+    monkeypatch.setattr(commands_base, "TYPING_REFRESH_SECONDS", 0.01)
     world = World([NotARequest()])
     world.llm.delay = 0.06
     await world.linked()

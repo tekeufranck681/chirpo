@@ -398,3 +398,43 @@ class TestErrors:
         gemini.post(URL).respond(200, text="<html>proxy error</html>")
         with pytest.raises(LLMUnavailableError):
             await interpret(provider)
+
+
+class TestSummarize:
+    """Plain text back, no tools (M6.9): same transport, retries and errors as interpret."""
+
+    async def test_text_comes_back_without_tools(
+        self, provider: GeminiProvider, gemini: respx.MockRouter
+    ) -> None:
+        from chirpo.core.llm import catch_up_request
+
+        body = answer({"text": "• Release moved"}, {"text": " to Monday."})
+        body["usageMetadata"] = {"promptTokenCount": 40, "candidatesTokenCount": 9}
+        route = gemini.post(URL).respond(json=body)
+        request = catch_up_request(["[14:02] Annie: release Monday"], "Franck", marker="m7f3a")
+        summary = await provider.summarize(request)
+        assert summary.text == "• Release moved to Monday."
+        assert (summary.input_tokens, summary.output_tokens) == (40, 9)
+        sent = json.loads(route.calls.last.request.content)
+        assert "tools" not in sent and "toolConfig" not in sent
+        assert sent["systemInstruction"]["parts"][0]["text"] == request.instructions
+
+    async def test_thoughts_are_not_the_summary(
+        self, provider: GeminiProvider, gemini: respx.MockRouter
+    ) -> None:
+        from chirpo.core.llm import catch_up_request
+
+        gemini.post(URL).respond(
+            json=answer({"text": "thinking...", "thought": True}, {"text": "• ok"})
+        )
+        summary = await provider.summarize(catch_up_request(["a"], "Franck", marker="m"))
+        assert summary.text == "• ok"
+
+    async def test_a_blocked_answer_is_refused(
+        self, provider: GeminiProvider, gemini: respx.MockRouter
+    ) -> None:
+        from chirpo.core.llm import catch_up_request
+
+        gemini.post(URL).respond(json=answer({"text": "x"}, finish="SAFETY"))
+        with pytest.raises(LLMRefusedError):
+            await provider.summarize(catch_up_request(["a"], "Franck", marker="m"))

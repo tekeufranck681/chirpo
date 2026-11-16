@@ -1,8 +1,9 @@
 """What every command handler gets, and the checks they share (who is asking, are they allowed)."""
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -26,6 +27,7 @@ from chirpo.core.ratelimit import LimitVerdict, RateLimiter
 from chirpo.core.workspaces import AuditEntry, Member, Workspace
 
 log = logging.getLogger(__name__)
+TYPING_REFRESH_SECONDS = 4.0  # Telegram shows "typing…" for 5 seconds per request
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,3 +173,30 @@ def _refusal_text(verdict: Verdict, member: Member, repo: RepoRef | None) -> str
                 permission=requirement.codehost,
                 repo=repo.full_name if repo else "this repo",
             )
+
+
+@asynccontextmanager
+async def typing_shown(request: Request) -> AsyncIterator[None]:
+    """Keeps "typing…" on screen until the reply is sent: chat apps drop it after ~5 seconds,
+    while the model can take 10-20, and a silent bot looks broken."""
+    messaging, chat = request.messaging, request.message.chat
+
+    async def show() -> None:
+        try:
+            await messaging.show_typing(chat)
+        except MessagingError as error:  # only a courtesy, but say why it's missing
+            log.info("typing_failed error=%s", type(error).__name__)
+
+    async def keep_typing() -> None:
+        while True:
+            await asyncio.sleep(TYPING_REFRESH_SECONDS)
+            await show()
+
+    await show()  # right away, not when the loop first gets a turn
+    task = asyncio.create_task(keep_typing())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task

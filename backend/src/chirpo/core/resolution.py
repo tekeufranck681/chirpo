@@ -15,6 +15,7 @@ from chirpo.core.actions import (
     AddLabels,
     AskClarifyingQuestion,
     AssignIssue,
+    CatchUp,
     CreateIssue,
     CreateIssues,
     IssueDraft,
@@ -126,7 +127,7 @@ async def resolve(
         return [
             await resolver.one(proposal)
             for proposal in proposals
-            if not isinstance(proposal, NotARequest | SmallTalk)
+            if not isinstance(proposal, NotARequest | SmallTalk | CatchUp)
         ]
     except _Unclear as unclear:
         return Question(unclear.question)

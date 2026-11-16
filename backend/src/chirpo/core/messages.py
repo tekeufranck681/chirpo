@@ -21,6 +21,7 @@ Commands:
 /personality off|light|playful - how chatty I am (admins)
 /settings - default repo, status labels, language, daily summary, timezone (admins change them)
 /templates pr [repo] - propose a PR template; reply to a message to use its text (admins)
+/catchup [3h] - what was said since your last message, or in the last hours
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -435,6 +436,32 @@ def duration(seconds: int) -> str:
         return f"{minutes} minutes"
     hours = math.ceil(minutes / 60)
     return "1 hour" if hours == 1 else f"{hours} hours"
+
+
+# What did I miss? (M6.9)
+CATCH_UP_HEADING = "What you missed since {since}:"
+CATCH_UP_HEADING_HOURS = "What was said in the last {period}:"
+CATCH_UP_NOTHING = "Nothing new since {since}."
+CATCH_UP_NO_OWN_MESSAGE = (
+    "(I keep messages for {hours} hours and have none from you, so this covers all of them.)"
+)
+CATCH_UP_CUT = "(Only the last {count} messages are covered.)"
+CATCH_UP_CUT_CHARS = "(A long conversation: only the most recent messages are covered.)"
+CATCH_UP_OPENED = "{repo}: opened issue {issues}"
+CATCH_UP_CLOSED = "{repo}: closed issue {issues}"
+CATCH_UP_PRS_OPENED = "{repo}: opened PR {pulls}"
+CATCH_UP_PRS_MERGED = "{repo}: merged PR {pulls}"
+CATCH_UP_NO_SUMMARY = "I couldn't sum up the messages this time. Try again in a moment."
+CATCH_UP_NEEDS_CONTEXT = (
+    "I can only catch you up when I keep recent messages, and this chat has that off. An admin "
+    "can turn it on with /context on."
+)
+CATCHUP_USAGE = (
+    "Usage: /catchup sums up what was said since your last message; /catchup 3h covers the "
+    "last 3 hours."
+)
+TODAY_AT = "{time}"
+DAY_AT = "{day} {time}"
 
 
 # Daily summary (M6.5)

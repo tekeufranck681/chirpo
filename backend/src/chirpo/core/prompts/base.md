@@ -149,6 +149,12 @@ Message: "what's on my plate this sprint?"
 Message: "what's Franck working on?"
 → `list_issues` with assignee "Franck".
 
+Message: "what did I miss?" / "catch me up" / "tl;dr?"
+→ `catch_up` (no hours: since the sender's last message).
+
+Message: "what happened in the last 3 hours?"
+→ `catch_up` with hours 3.
+
 Message: "tell #8 the fix shipped in 1.2"
 → `comment_on_issue` with issue {number: 8}, body "The fix shipped in 1.2."
 

@@ -57,6 +57,7 @@ class TestRegistry:
             "not_a_request",
             "small_talk",
             "look_at_recent_image",
+            "catch_up",
         }
 
     @pytest.mark.parametrize(
@@ -349,6 +350,7 @@ class TestParseToolCall:
             "small_talk": {"reply": "You're welcome!"},
             "not_a_request": {},
             "look_at_recent_image": {},
+            "catch_up": {"hours": 3},
         }
         assert set(examples) == set(ACTIONS)
         for name, arguments in examples.items():

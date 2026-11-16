@@ -324,6 +324,9 @@ class PullRequest(BaseModel):
     url: str
     draft: bool = False
     mergeable: bool | None = None  # None: the code host hasn't computed it yet
+    created_at: AwareDatetime | None = None
+    updated_at: AwareDatetime | None = None
+    merged_at: AwareDatetime | None = None
     checks: CheckStatus = CheckStatus.NONE
     approvals: int = 0
     changes_requested: bool = False
@@ -355,6 +358,8 @@ class PullRequestQuery(BaseModel):
     state: Literal["open", "closed", "all"] = "open"
     author: str | None = None
     limit: int = Field(default=30, ge=1, le=100)
+    # Only PRs changed since then, newest change first (M6.9)
+    updated_since: AwareDatetime | None = None
 
 
 class MergeMethod(StrEnum):
