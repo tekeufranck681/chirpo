@@ -2,9 +2,9 @@
 request (never pushed to the default branch); an existing template is never touched."""
 
 import pytest
-from chirpo.core.commands.templates import PR_TEMPLATE_BRANCH, PR_TEMPLATE_PATH
 
 from chirpo.core import messages
+from chirpo.core.commands.templates import PR_TEMPLATE_BRANCH, PR_TEMPLATE_PATH
 from chirpo.core.domain import AuditResult, RepoPermission
 from chirpo.core.errors import CodeHostUnavailableError
 from tests.unit.core.test_commands import (
