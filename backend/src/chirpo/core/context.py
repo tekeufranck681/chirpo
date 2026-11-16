@@ -7,6 +7,7 @@ block is capped in size and later wrapped in a marker-named block by `interpret_
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
 
 from chirpo.core.actions import hidden_char, unsafe_char
 from chirpo.core.domain import AttachmentKind, Issue, RecentMessage, RepoRef
@@ -59,10 +60,10 @@ def context_blocks(
         ("open_issues", "\n".join(_issue(i) for i in team.open_issues[:MAX_ISSUES]) or "none"),
     ]
     if recent:
-        said = "\n".join(_said(m, media=media, look_at=look_at) for m in recent)
+        said = "\n".join(chat_line(m, media=media, look_at=look_at) for m in recent)
         blocks.append(("recent_messages", said))
     if replied is not None:
-        blocks.append(("replied_message", _said(replied, media=media)))
+        blocks.append(("replied_message", chat_line(replied, media=media)))
     if proposal is not None:
         blocks.append(("pending_proposal", "\n".join(_step(step) for step in proposal)))
     return blocks
@@ -103,11 +104,19 @@ def _issue(issue: Issue) -> str:
     return clean(f"#{issue.number} {issue.title}{suffix}", MAX_ISSUE_LINE)
 
 
-def _said(message: RecentMessage, *, media: bool = False, look_at: str | None = None) -> str:
+def chat_line(
+    message: RecentMessage,
+    *,
+    media: bool = False,
+    look_at: str | None = None,
+    zone: ZoneInfo | None = None,
+) -> str:
+    """`zone`: the team's timezone, so a time the model repeats is the one people see."""
     name = clean(message.sender.display_name, MAX_NAME)
     shown = " ".join(_media(message, look_at)) if media else ""
     body = f"{shown} {message.text}".strip() if shown else message.text
-    return clean(f"[{message.sent_at:%H:%M}] {name}: {body}", MAX_MESSAGE_LINE).rstrip()
+    sent = message.sent_at.astimezone(zone) if zone else message.sent_at
+    return clean(f"[{sent:%H:%M}] {name}: {body}", MAX_MESSAGE_LINE).rstrip()
 
 
 def _media(message: RecentMessage, look_at: str | None) -> list[str]:

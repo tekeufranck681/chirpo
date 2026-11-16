@@ -1,10 +1,11 @@
 """Counts every LLM call and its tokens (D57), whatever the provider."""
 
+from collections.abc import Awaitable
 from typing import Any
 
 from chirpo import metrics
 from chirpo.core.errors import LLMError
-from chirpo.core.llm import Interpretation, InterpretRequest
+from chirpo.core.llm import Interpretation, InterpretRequest, Summary, SummaryRequest
 from chirpo.core.ports import LLMProvider
 
 
@@ -20,9 +21,15 @@ class MeteredLLM:
         return getattr(self._inner, name)
 
     async def interpret(self, request: InterpretRequest) -> Interpretation:
+        return await self._counted(self._inner.interpret(request))
+
+    async def summarize(self, request: SummaryRequest) -> Summary:
+        return await self._counted(self._inner.summarize(request))
+
+    async def _counted[T: (Interpretation, Summary)](self, call: Awaitable[T]) -> T:
         model = self.model
         try:
-            answer = await self._inner.interpret(request)
+            answer = await call
         except Exception as error:
             # Our own LLM error classes are a short fixed list; anything else is "other".
             kind = type(error).__name__ if isinstance(error, LLMError) else "other"

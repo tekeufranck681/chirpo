@@ -319,6 +319,34 @@ cases:
     expect:
       - {action: create_issue, repo: web, title_words: [payment, card]}
 
+  - id: catch-up-missed
+    category: catch_up
+    from: franck
+    text: "back from lunch, what did I miss?"
+    expect:
+      - {action: catch_up, hours: null}
+
+  - id: catch-up-hours
+    category: catch_up
+    from: annie
+    text: "can you sum up the last 3 hours for me"
+    expect:
+      - {action: catch_up, hours: 3}
+
+  - id: catch-up-french
+    category: catch_up
+    from: franck
+    text: "j'étais absent, qu'est-ce que j'ai raté ?"
+    expect:
+      - {action: catch_up, hours: null}
+
+  - id: catch-up-not-a-bug
+    category: catch_up
+    from: annie
+    text: "I missed the bus this morning lol"
+    expect:
+      - {action: not_a_request}
+
   - id: link-bang
     category: link
     from: franck

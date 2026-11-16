@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from chirpo.core.commands import basic, issues, settings, workspace
+from chirpo.core.commands import catchup as catchup  # explicit: mypy meets it in a cycle
 from chirpo.core.commands import templates as templates  # explicit: mypy meets it in a cycle
 from chirpo.core.commands.base import Handler, Request, Services
 
@@ -24,6 +25,7 @@ COMMANDS: Mapping[str, Handler] = MappingProxyType(
         "personality": workspace.personality,
         "settings": settings.settings,
         "templates": templates.templates,
+        "catchup": catchup.catchup,
     }
 )
 

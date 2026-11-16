@@ -242,6 +242,18 @@ class LookAtRecentImage(Proposal):
     """No fields: chirpo knows which image (D52)."""
 
 
+class CatchUp(Proposal):
+    """What did I miss? (M6.9): chirpo sums up the kept messages; nothing happens on GitHub."""
+
+    hours: int | None = Field(
+        default=None,
+        ge=1,
+        le=720,
+        description="Only when the message names a period ('the last 3 hours', 'today' = hours "
+        "since the morning); otherwise since the sender's last message.",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ActionSpec:
     name: str
@@ -345,6 +357,14 @@ _SPECS = (
         "Look at the image marked 'can be looked at' in recent_messages, when the message refers "
         "to it ('this', 'that screenshot', 'log that as a bug') and no image is attached. Call it "
         "alone; you get the picture and ask again. Only available when such an image exists.",
+        None,
+        False,
+    ),
+    ActionSpec(
+        "catch_up",
+        CatchUp,
+        "Sum up what the chat said while the sender was away, when they ask what they missed "
+        "('what did I miss?', 'catch me up', 'tl;dr of today'). Text only.",
         None,
         False,
     ),

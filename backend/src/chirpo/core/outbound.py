@@ -44,6 +44,13 @@ def neutralise(text: str) -> str:
 
 # A link or a t.me address: Telegram makes them tappable, so a model must not post one.
 _LINK = re.compile(r"https?://|www\.|\bt\.me/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+# A bare address Telegram still makes tappable ("deploy-login.com", "bit.ly", "t.me", "tg://",
+# "mailto:"). Web endings only, so file names like main.py or app.ts stay.
+_BARE_LINK = re.compile(
+    r"\btg://|\bmailto:|\bt\.me\b|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|ly|me|co|app|dev|xyz|"
+    r"info|biz|top|site|online|link|click|live|shop|ru|cn|tk|ml|ga|cf|gq|cc|to|gg|ai)\b",
+    re.IGNORECASE,
+)
 # "/unlink" becomes a tappable bot command in a group, also in quotes or brackets. A slash after a
 # letter, another slash or a colon is part of a path or a URL and stays.
 _COMMAND = re.compile(r"(?<![\w/:])/(?=\w)")
@@ -51,6 +58,17 @@ _COMMAND = re.compile(r"(?<![\w/:])/(?=\w)")
 
 def _defuse(line: str) -> str:
     return break_mentions(_COMMAND.sub("/" + ZWSP, line))
+
+
+def plain_lines(text: str, *, line_limit: int, max_lines: int) -> str | None:
+    """Several lines of model text made safe to post, like `plain_reply` line by line; a line
+    with a link is dropped, not the whole text. None when no line is left."""
+    kept = []
+    for line in text.splitlines():
+        visible = clean(line, line_limit)
+        if visible and not _LINK.search(visible) and not _BARE_LINK.search(visible):
+            kept.append(_defuse(visible))
+    return "\n".join(kept[:max_lines]) or None
 
 
 def shown(text: str, limit: int) -> str:

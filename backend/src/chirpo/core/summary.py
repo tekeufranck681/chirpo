@@ -197,17 +197,13 @@ async def _part(
     day: str,
     when: str,
 ) -> str:
-    recent, open_now, milestones, pulls = await asyncio.gather(
-        codehost.list_issues(repo, IssueQuery(state="all", since=since, limit=MAX_LISTED)),
+    (opened, closed, busy), open_now, milestones, pulls = await asyncio.gather(
+        changes_since(repo, codehost, since),
         codehost.list_issues(repo, IssueQuery(limit=MAX_LISTED)),
         codehost.list_milestones(repo),
         codehost.list_pull_requests(repo, PullRequestQuery(limit=MAX_LISTED)),
     )
-    opened = sorted((i for i in recent if i.created_at >= since), key=lambda i: i.number)
-    closed = [
-        i for i in recent if i.state == IssueState.CLOSED and i.closed_at and i.closed_at >= since
-    ]
-    more = "+" if len(recent) >= MAX_LISTED else ""  # a very busy day: only the newest were read
+    more = "+" if busy else ""
     lines = [messages.SUMMARY_HEADING.format(repo=repo.full_name, day=day)]
     if opened or closed:
         lines.append(
@@ -216,7 +212,7 @@ async def _part(
             )
         )
         if opened:
-            lines.append(messages.SUMMARY_NEW.format(issues=_named(opened)))
+            lines.append(messages.SUMMARY_NEW.format(issues=named(opened)))
     else:
         lines.append(messages.SUMMARY_QUIET.format(when=when))
     capped = "+" if len(open_now) >= MAX_LISTED else ""
@@ -233,7 +229,22 @@ async def _part(
     return "\n".join(lines)
 
 
-def _named(issues: Sequence[Issue]) -> str:
+async def changes_since(
+    repo: RepoRef, codehost: CodeHostAdapter, since: datetime
+) -> tuple[list[Issue], list[Issue], bool]:
+    """Issues opened and closed since then, and whether it was so busy that only the newest
+    were read."""
+    recent = await codehost.list_issues(
+        repo, IssueQuery(state="all", since=since, limit=MAX_LISTED)
+    )
+    opened = sorted((i for i in recent if i.created_at >= since), key=lambda i: i.number)
+    closed = [
+        i for i in recent if i.state == IssueState.CLOSED and i.closed_at and i.closed_at >= since
+    ]
+    return opened, closed, len(recent) >= MAX_LISTED
+
+
+def named(issues: Sequence[Issue]) -> str:
     named = ", ".join(f'#{i.number} "{shown(i.title, MAX_TITLE)}"' for i in issues[:MAX_NEW])
     if len(issues) > MAX_NEW:
         named += messages.SUMMARY_MORE.format(count=len(issues) - MAX_NEW)
