@@ -13,6 +13,7 @@ from chirpo.core.domain import (
     ChatRef,
     ChatUser,
     CloseReason,
+    FileProposal,
     InboundCallback,
     InboundEvent,
     InboundMessage,
@@ -425,6 +426,8 @@ class FakeCodeHost:
     def __init__(self) -> None:
         self.issues: dict[tuple[str, int], Issue] = {}
         self.pulls: dict[tuple[str, int], PullRequest] = {}
+        self.pr_templates: dict[str, str] = {}  # repo key -> template text ("" for a folder)
+        self.proposals: dict[tuple[str, str], FileProposal] = {}  # (repo key, branch) -> file
         self.comments: list[tuple[str, int, str]] = []
         self.labels: dict[str, set[str]] = {}
         self.milestones: dict[str, list[Milestone]] = {}  # open ones, per repo key
@@ -558,6 +561,17 @@ class FakeCodeHost:
 
     async def permission_of(self, repo: RepoRef, username: str) -> RepoPermission:
         return self.permissions.get((repo.key, username.casefold()), RepoPermission.NONE)
+
+    async def update_pull_request_body(self, repo: RepoRef, number: int, body: str) -> None:
+        key = (repo.key, number)
+        self.pulls[key] = self.pulls[key].model_copy(update={"body": body})
+
+    async def pull_request_template(self, repo: RepoRef) -> str | None:
+        return self.pr_templates.get(repo.key)
+
+    async def propose_file(self, repo: RepoRef, proposal: FileProposal) -> str:
+        self.proposals.setdefault((repo.key, proposal.branch), proposal)
+        return f"https://fake.example/{repo.full_name}/pull/{proposal.branch}"
 
     async def list_pull_requests(self, repo: RepoRef, query: PullRequestQuery) -> list[PullRequest]:
         def state_matches(pull: PullRequest) -> bool:

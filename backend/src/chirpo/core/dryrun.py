@@ -13,10 +13,12 @@ from chirpo.core.actions import (
     CreateIssue,
     CreateIssues,
     IssueDraft,
+    LinkPullRequest,
     RemoveLabels,
     ReopenIssue,
     SetStatus,
     UnassignIssue,
+    UnlinkPullRequest,
 )
 from chirpo.core.context import MAX_NAME
 from chirpo.core.domain import RepoRef
@@ -63,6 +65,12 @@ def _lines(step: Resolved, default_repo: RepoRef, limit: int) -> list[str]:
             return [messages.DRY_CLOSE.format(issue=issue, reason=reason)]
         case ReopenIssue():
             return [messages.DRY_REOPEN.format(issue=issue)]
+        case LinkPullRequest() | UnlinkPullRequest():
+            text = (
+                messages.DRY_LINK if isinstance(proposal, LinkPullRequest) else messages.DRY_UNLINK
+            )
+            title = shown(step.pull.title, MAX_TITLE) if step.pull else ""
+            return [text.format(pull=proposal.pull_request, title=title, issue=_linked(step))]
     raise TypeError(f"no dry-run text for {type(proposal).__name__}")
 
 
@@ -86,6 +94,17 @@ def _issue(step: Resolved, default_repo: RepoRef) -> str:
     if step.repo != default_repo:
         text += messages.DRY_IN_REPO.format(repo=step.repo.full_name)
     return text
+
+
+def _linked(step: Resolved) -> str:
+    """The issue a link is about, with its repo when it isn't the pull request's."""
+    issue_repo = getattr(step.proposal, "issue_repo", None)
+    if step.issue is None:
+        return ""
+    text = messages.DRY_ISSUE.format(
+        number=step.issue.number, title=shown(step.issue.title, MAX_TITLE)
+    )
+    return text + messages.DRY_IN_REPO.format(repo=issue_repo) if issue_repo else text
 
 
 def _people(logins: Sequence[str]) -> str:

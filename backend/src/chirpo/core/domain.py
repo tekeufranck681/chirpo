@@ -329,6 +329,23 @@ class PullRequest(BaseModel):
     # Issues in this repo the PR closes when merged into the default branch ("Closes #12" links,
     # shown in the Development box on GitHub).
     closes_issues: tuple[int, ...] = ()
+    body: str = ""  # the description, outside text (M6.15 adds a closing line to it)
+    # GitHub links issues and closes them only for PRs into the default branch (D38)
+    into_default: bool = True
+
+
+class FileProposal(BaseModel):
+    """One new file proposed as a pull request from its own branch, never pushed to the default
+    branch (D25): chirpo's PR template (M6.16)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    branch: str
+    path: str
+    content: str
+    commit_message: str
+    title: str
+    body: str
 
 
 class PullRequestQuery(BaseModel):

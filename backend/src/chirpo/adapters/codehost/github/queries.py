@@ -4,12 +4,14 @@ PULL_REQUEST_FIELDS = """
 fragment PullRequestFields on PullRequest {
   number
   title
+  body
   state
   isDraft
   url
   mergeable
   headRefName
   baseRefName
+  baseRepository { defaultBranchRef { name } }
   author { login __typename }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   latestOpinionatedReviews(first: 50, writersOnly: true) { nodes { state } }

@@ -10,6 +10,7 @@ from chirpo.core.domain import (
     Button,
     ChatRef,
     ChatUser,
+    FileProposal,
     InboundCallback,
     InboundEvent,
     InboundMessage,
@@ -177,6 +178,16 @@ class CodeHostAdapter(Protocol):
     ) -> list[PullRequest]: ...
 
     async def get_pull_request(self, repo: RepoRef, number: int) -> PullRequest: ...
+
+    async def update_pull_request_body(self, repo: RepoRef, number: int, body: str) -> None: ...
+
+    async def pull_request_template(self, repo: RepoRef) -> str | None:
+        """The repo's pull request template ("" for a folder of several); None if it has none."""
+        ...
+
+    async def propose_file(self, repo: RepoRef, proposal: FileProposal) -> str:
+        """Opens a pull request adding the file from its own branch; returns its link."""
+        ...
 
     async def merge_pull_request(
         self, repo: RepoRef, number: int, method: MergeMethod

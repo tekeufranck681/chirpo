@@ -4,12 +4,14 @@
       "pullRequest": {
         "number": 12,
         "title": "feat(github): issues, labels, users and permissions via the GitHub App",
+        "body": "Adds issues and labels.\n\nCloses #8",
         "state": "MERGED",
         "isDraft": false,
         "url": "https://github.com/tekeufranck681/chirpo/pull/12",
         "mergeable": "UNKNOWN",
         "headRefName": "feat/github-issues",
         "baseRefName": "main",
+        "baseRepository": {"defaultBranchRef": {"name": "main"}},
         "author": {
           "login": "tekeufranck681",
           "__typename": "User"

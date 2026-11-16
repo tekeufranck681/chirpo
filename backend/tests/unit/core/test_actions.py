@@ -49,6 +49,8 @@ class TestRegistry:
             "comment_on_issue",
             "close_issue",
             "reopen_issue",
+            "link_pull_request",
+            "unlink_pull_request",
             "list_issues",
             "my_issues",
             "ask_clarifying_question",
@@ -90,7 +92,7 @@ class TestRegistry:
         assert all(spec.description.strip() for spec in ACTIONS.values())
 
     def test_every_concrete_proposal_is_registered(self) -> None:
-        bases = {"Proposal", "IssueRef", "RepoScoped", "IssueDraft", "OnIssue"}
+        bases = {"Proposal", "IssueRef", "RepoScoped", "IssueDraft", "OnIssue", "OnPullRequest"}
         concrete = {
             model
             for model in vars(actions_module).values()
@@ -339,6 +341,8 @@ class TestParseToolCall:
             "comment_on_issue": {"issue": ISSUE_12, "body": "Fixed in 1.2"},
             "close_issue": {"issue": ISSUE_12, "reason": "duplicate"},
             "reopen_issue": {"issue": ISSUE_12},
+            "link_pull_request": {"pull_request": 15, "issue": ISSUE_12},
+            "unlink_pull_request": {"pull_request": 15, "issue": ISSUE_12, "issue_repo": "web"},
             "list_issues": {"assignee": "Franck", "labels": ["bug"], "state": "all"},
             "my_issues": {"state": "closed"},
             "ask_clarifying_question": {"question": "Which Franck?"},

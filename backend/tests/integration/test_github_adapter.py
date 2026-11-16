@@ -689,3 +689,160 @@ async def test_list_issues_since_a_time_and_when_they_closed(
     [issue] = await adapter.list_issues(REPO, IssueQuery(state="all", since=since))
     assert params(route)["since"] == "2026-11-07T09:00:00Z"
     assert issue.closed_at == datetime(2026, 11, 8, 10, 0, tzinfo=UTC)
+
+
+# ------------------------------------------------------------ PR links and templates (M6.15/16)
+
+REPO_API = "/repos/tekeufranck681/chirpo"
+
+
+async def test_a_pull_request_carries_its_description(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    github.post(GRAPHQL).respond(json=payload("graphql_pull_request"))
+    pull = await adapter.get_pull_request(REPO, 12)
+    assert pull.body.endswith("Closes #8")
+
+
+async def test_the_description_is_updated_by_rest(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    route = github.patch(f"{REPO_API}/pulls/15").respond(200, json={"number": 15})
+    await adapter.update_pull_request_body(REPO, 15, "Fix.\n\nCloses #12")
+    assert sent(route) == {"body": "Fix.\n\nCloses #12"}
+
+
+async def test_a_pr_template_is_found_in_dot_github_whatever_its_case(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    import base64
+
+    github.get(f"{REPO_API}/contents/.github").respond(
+        json=[{"name": "PULL_REQUEST_TEMPLATE.md", "path": ".github/PULL_REQUEST_TEMPLATE.md"}]
+    )
+    text = base64.b64encode(b"## What\n\nCloses #").decode()
+    github.get(f"{REPO_API}/contents/.github/PULL_REQUEST_TEMPLATE.md").respond(
+        json={"content": text, "encoding": "base64"}
+    )
+    assert await adapter.pull_request_template(REPO) == "## What\n\nCloses #"
+
+
+async def test_no_pr_template_anywhere(adapter: GitHubAdapter, github: respx.MockRouter) -> None:
+    github.get(f"{REPO_API}/contents/.github").respond(404, json={"message": "Not Found"})
+    github.get(f"{REPO_API}/contents/").respond(json=[{"name": "README.md", "path": "README.md"}])
+    github.get(f"{REPO_API}/contents/docs").respond(404, json={"message": "Not Found"})
+    assert await adapter.pull_request_template(REPO) is None
+
+
+async def test_a_file_is_proposed_on_its_own_branch_as_a_pull_request(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    import base64
+
+    from chirpo.core.domain import FileProposal
+
+    github.get(REPO_API).respond(json={"default_branch": "main"})
+    github.get(f"{REPO_API}/git/ref/heads/main").respond(json={"object": {"sha": "abc123"}})
+    branch = github.post(f"{REPO_API}/git/refs").respond(201, json={"ref": "refs/heads/x"})
+    put = github.put(f"{REPO_API}/contents/.github/pull_request_template.md").respond(
+        201, json={"content": {}}
+    )
+    pr = github.post(f"{REPO_API}/pulls").respond(
+        201, json={"html_url": "https://github.com/tekeufranck681/chirpo/pull/20"}
+    )
+    proposal = FileProposal(
+        branch="chirpo/pr-template",
+        path=".github/pull_request_template.md",
+        content="## What\n",
+        commit_message="chore: add a pull request template",
+        title="Add a pull request template",
+        body="Proposed by chirpo.",
+    )
+    url = await adapter.propose_file(REPO, proposal)
+    assert url == "https://github.com/tekeufranck681/chirpo/pull/20"
+    assert sent(branch) == {"ref": "refs/heads/chirpo/pr-template", "sha": "abc123"}
+    assert sent(put)["branch"] == "chirpo/pr-template"
+    assert base64.b64decode(sent(put)["content"]) == b"## What\n"
+    assert sent(pr)["base"] == "main" and sent(pr)["head"] == "chirpo/pr-template"
+
+
+async def test_asking_twice_returns_the_open_proposal(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from chirpo.core.domain import FileProposal
+
+    github.get(REPO_API).respond(json={"default_branch": "main"})
+    github.get(f"{REPO_API}/git/ref/heads/main").respond(json={"object": {"sha": "abc123"}})
+    github.post(f"{REPO_API}/git/refs").respond(422, json={"message": "Reference already exists"})
+    github.get(f"{REPO_API}/pulls").respond(
+        json=[{"html_url": "https://github.com/tekeufranck681/chirpo/pull/20"}]
+    )
+    proposal = FileProposal(
+        branch="chirpo/pr-template",
+        path="x.md",
+        content="",
+        commit_message="m",
+        title="t",
+        body="b",
+    )
+    assert await adapter.propose_file(REPO, proposal) == (
+        "https://github.com/tekeufranck681/chirpo/pull/20"
+    )
+
+
+async def test_a_closed_proposal_is_opened_again_from_its_branch(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from chirpo.core.domain import FileProposal
+
+    github.get(REPO_API).respond(json={"default_branch": "release/2.0"})
+    github.get(f"{REPO_API}/git/ref/heads/release/2.0").respond(json={"object": {"sha": "abc"}})
+    github.post(f"{REPO_API}/git/refs").respond(422, json={"message": "Reference already exists"})
+    github.get(f"{REPO_API}/pulls").respond(json=[])  # its PR was closed
+    github.put(f"{REPO_API}/contents/x.md").respond(422, json={"message": "sha wasn't supplied"})
+    pr = github.post(f"{REPO_API}/pulls").respond(201, json={"html_url": "https://gh/pull/21"})
+    proposal = FileProposal(
+        branch="chirpo/pr-template",
+        path="x.md",
+        content="",
+        commit_message="m",
+        title="t",
+        body="b",
+    )
+    assert await adapter.propose_file(REPO, proposal) == "https://gh/pull/21"
+    assert sent(pr)["base"] == "release/2.0"
+
+
+async def test_a_branch_made_for_a_file_that_failed_is_deleted(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    from chirpo.core.domain import FileProposal
+
+    github.get(REPO_API).respond(json={"default_branch": "main"})
+    github.get(f"{REPO_API}/git/ref/heads/main").respond(json={"object": {"sha": "abc"}})
+    github.post(f"{REPO_API}/git/refs").respond(201, json={"ref": "refs/heads/chirpo/x"})
+    github.put(f"{REPO_API}/contents/x.md").respond(
+        403, json={"message": "Resource not accessible"}
+    )
+    dropped = github.delete(f"{REPO_API}/git/refs/heads/chirpo/x").respond(204)
+    proposal = FileProposal(
+        branch="chirpo/x", path="x.md", content="", commit_message="m", title="t", body="b"
+    )
+    with pytest.raises(CodeHostForbiddenError):
+        await adapter.propose_file(REPO, proposal)
+    assert dropped.called
+
+
+async def test_a_pull_request_into_another_branch_says_so(
+    adapter: GitHubAdapter, github: respx.MockRouter
+) -> None:
+    data = payload("graphql_pull_request")
+    node = data["data"]["repository"]["pullRequest"]
+    assert (await adapter_pull(adapter, github, data)).into_default
+    node["baseRefName"] = "chirpo/pr-template"
+    assert not (await adapter_pull(adapter, github, data)).into_default
+
+
+async def adapter_pull(adapter: GitHubAdapter, github: respx.MockRouter, data: Any) -> Any:
+    github.post(GRAPHQL).respond(json=data)
+    return await adapter.get_pull_request(REPO, 12)

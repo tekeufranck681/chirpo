@@ -53,6 +53,8 @@ _CHECKS = frozenset(
         "title_words",
         "count",
         "milestone",
+        "pull_request",
+        "issue_repo",
     }
 )
 
@@ -300,6 +302,14 @@ def _check(step: Step, proposal: Proposal, case: Case, fx: Fixture) -> list[str]
         problems.append(f"{name}: reason {values['reason']}, expected {step['reason']}")
     if "repo" in step and not _same_repo(step["repo"], values.get("repo"), fx):
         problems.append(f"{name}: repo {values.get('repo')!r}, expected {step['repo']!r}")
+    if "pull_request" in step and values.get("pull_request") != step["pull_request"]:
+        problems.append(
+            f"{name}: pull request {values.get('pull_request')}, expected {step['pull_request']}"
+        )
+    if "issue_repo" in step and not _same_repo(step["issue_repo"], values.get("issue_repo"), fx):
+        problems.append(
+            f"{name}: issue repo {values.get('issue_repo')!r}, expected {step['issue_repo']!r}"
+        )
     if "state" in step and values["state"] != step["state"]:
         problems.append(f"{name}: state {values['state']}, expected {step['state']}")
     if "title_words" in step and not _has_word(_titles(values), step["title_words"]):
