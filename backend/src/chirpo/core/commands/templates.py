@@ -3,13 +3,14 @@ line, so pull requests link the issue they fix. It is opened as a pull request f
 branch, never pushed to the default branch, and a repo's existing template is never touched.
 """
 
+import hashlib
 import re
 
 from chirpo.core import messages
 from chirpo.core.commands.base import Request, allowed, audit, find_actor, limited
 from chirpo.core.context import MAX_NAME
-from chirpo.core.domain import AuditResult, FileProposal, RepoRef
-from chirpo.core.errors import CodeHostError
+from chirpo.core.domain import AuditResult, FileProposal, InboundMessage, RepoRef
+from chirpo.core.errors import CodeHostEmptyRepoError, CodeHostError
 from chirpo.core.links import GAP, KEYWORDS
 from chirpo.core.outbound import shown
 from chirpo.core.permissions import Action
@@ -31,6 +32,10 @@ PR_TEMPLATE_BODY = (
     "Adds a pull request template with a `Closes #` line: a pull request that names the issue it "
     "fixes is linked to it, and GitHub closes the issue when the pull request is merged into the "
     "default branch.\n\nEdit it as you like before merging. Requested by @{login} via chirpo."
+)
+PR_TEMPLATE_PASTED_BODY = (
+    "Adds the pull request template pasted in chat. Edit it as you like before merging. "
+    "Requested by @{login} via chirpo."
 )
 _CLOSING_PLACEHOLDER = re.compile(rf"\b{KEYWORDS}{GAP}#", re.IGNORECASE)
 
@@ -56,8 +61,16 @@ async def templates(request: Request) -> None:
         repo = found[0]
     if not await allowed(request, actor, Action.PROPOSE_TEMPLATE, repo):
         return
+    content = _pasted(request.message)
+    if content == "":
+        await request.reply(messages.PR_TEMPLATE_NOTHING_PASTED)
+        return
+    login = actor.member.codehost.login if actor.member.codehost else "?"
+    proposal = _proposal(login, content)
     codehost = actor.services.codehost
-    payload = {"repo": repo.full_name}
+    payload = {"repo": repo.full_name, "branch": proposal.branch}
+    if content is not None:  # whose text it was: the message stays in the chat, not the audit
+        payload["pasted_from"] = request.message.reply_to_message_id or ""
     try:
         existing = await codehost.pull_request_template(repo)
         if existing is not None:
@@ -70,26 +83,50 @@ async def templates(request: Request) -> None:
         limits = actor.services.limits
         if limits is not None and await limited(request, await limits.check_write(actor.member.id)):
             return
-        login = actor.member.codehost.login if actor.member.codehost else "?"
-        url = await codehost.propose_file(repo, _proposal(login))
+        url = await codehost.propose_file(repo, proposal)
     except CodeHostError as error:
         await audit(
             actor, Action.PROPOSE_TEMPLATE, AuditResult.FAILED, payload, type(error).__name__
         )
+        if isinstance(error, CodeHostEmptyRepoError):  # the team's state, not a failure
+            await request.reply(messages.PR_TEMPLATE_EMPTY_REPO.format(repo=repo.full_name))
+            return
         await request.reply(messages.GITHUB_TROUBLE)
         raise
     await audit(actor, Action.PROPOSE_TEMPLATE, AuditResult.EXECUTED, {**payload, "url": url})
-    await request.reply(messages.PR_TEMPLATE_PROPOSED.format(repo=repo.full_name, url=url))
+    has_line = content is None or _CLOSING_PLACEHOLDER.search(content)
+    text = messages.PR_TEMPLATE_PROPOSED if has_line else messages.PR_TEMPLATE_PROPOSED_NO_CLOSES
+    await request.reply(text.format(repo=repo.full_name, url=url))
 
 
-def _proposal(login: str) -> FileProposal:
+def _pasted(message: InboundMessage) -> str | None:
+    """The template pasted in the message replied to, "" when it holds no text, None when the
+    command isn't a reply. A reply to chirpo's own message gets chirpo's template."""
+    if message.reply_to_message_id is None or message.replies_to_bot:
+        return None
+    return message.reply_to_text.rstrip()
+
+
+def _proposal(login: str, pasted: str | None) -> FileProposal:
+    if pasted is None:
+        return FileProposal(
+            branch=PR_TEMPLATE_BRANCH,
+            path=PR_TEMPLATE_PATH,
+            content=PR_TEMPLATE,
+            commit_message="chore: add a pull request template",
+            title="Add a pull request template",
+            body=PR_TEMPLATE_BODY.format(login=login),
+        )
+    content = f"{pasted}\n"
+    # One branch per text: a new paste gets its own PR, the same paste sent twice reuses it
+    digest = hashlib.sha256(content.encode()).hexdigest()[:8]
     return FileProposal(
-        branch=PR_TEMPLATE_BRANCH,
+        branch=f"{PR_TEMPLATE_BRANCH}-{digest}",
         path=PR_TEMPLATE_PATH,
-        content=PR_TEMPLATE,
+        content=content,
         commit_message="chore: add a pull request template",
         title="Add a pull request template",
-        body=PR_TEMPLATE_BODY.format(login=login),
+        body=PR_TEMPLATE_PASTED_BODY.format(login=login),
     )
 
 

@@ -20,7 +20,7 @@ Commands:
 /context on|off - keep recent messages so I understand follow-ups (admins)
 /personality off|light|playful - how chatty I am (admins)
 /settings - default repo, status labels, language, daily summary, timezone (admins change them)
-/templates pr [repo] - propose a pull request template that links issues (admins)
+/templates pr [repo] - propose a PR template; reply to a message to use its text (admins)
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -188,11 +188,24 @@ TIMEZONE_UNKNOWN = (
 DEFAULT_REPO_SET = "Done: {repo} is now the default repo."
 TEMPLATES_USAGE = (
     "Usage: /templates pr proposes a pull request template with a Closes # line for the default "
-    "repo; /templates pr web for another linked one (admins)."
+    "repo; /templates pr web for another linked one (admins). Send it as a reply to a message "
+    "to propose that message's text as the template."
 )
 PR_TEMPLATE_PROPOSED = (
     "Opened a pull request adding a PR template to {repo}, with a Closes # line so PRs link "
     "their issue. Review and merge it on GitHub:\n{url}"
+)
+PR_TEMPLATE_PROPOSED_NO_CLOSES = (
+    "Opened a pull request adding your PR template to {repo}. It has no Closes # line: adding "
+    "one makes PRs link the issue they fix. Review and merge it on GitHub:\n{url}"
+)
+PR_TEMPLATE_EMPTY_REPO = (
+    "{repo} is empty: a pull request needs a first commit to start from. Push one (a README is "
+    "enough), then try again."
+)
+PR_TEMPLATE_NOTHING_PASTED = (
+    "The message you replied to has no text to use as a template. Reply with /templates pr to "
+    "the template's text, or send /templates pr alone for mine."
 )
 PR_TEMPLATE_EXISTS = "{repo} already has a pull request template."
 PR_TEMPLATE_EXISTS_NO_CLOSES = (

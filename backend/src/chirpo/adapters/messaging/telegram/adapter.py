@@ -236,6 +236,7 @@ class TelegramAdapter:
             reply_to_message_id=str(replied.message_id) if replied else None,
             attachments=attachments,
             reply_to_attachments=_attachments(replied) if replied else (),
+            reply_to_text=(replied.text or replied.caption or "") if replied else "",
             is_private_chat=message.chat.type == "private",
         )
 
