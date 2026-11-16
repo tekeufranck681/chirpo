@@ -319,6 +319,35 @@ cases:
     expect:
       - {action: create_issue, repo: web, title_words: [payment, card]}
 
+  - id: link-bang
+    category: link
+    from: franck
+    text: "link !15 to #12"
+    expect:
+      - {action: link_pull_request, pull_request: 15, issue: 12}
+
+  - id: link-fixes
+    category: link
+    from: annie
+    text: "PR 15 fixes #3, can you link them?"
+    expect:
+      - {action: link_pull_request, pull_request: 15, issue: 3}
+
+  - id: link-unlink
+    category: link
+    from: franck
+    text: "unlink !15 from #12, wrong issue"
+    expect:
+      - {action: unlink_pull_request, pull_request: 15, issue: 12}
+
+  - id: link-other-repo
+    category: link
+    from: franck
+    text: "link PR 9 to #4 in the web repo"
+    any_of:
+      - [{action: link_pull_request, pull_request: 9, issue: 4, issue_repo: web}]
+      - [{action: link_pull_request, pull_request: 9, issue: 4, repo: web}]
+
   - id: read-other-repo
     category: read
     from: franck

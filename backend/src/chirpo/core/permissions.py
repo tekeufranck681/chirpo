@@ -35,6 +35,8 @@ class Action(StrEnum):
     TRIAGE_ISSUE = "triage_issue"  # assign, label, close, reopen
     MERGE_PULL_REQUEST = "merge_pull_request"
     MANAGE_REPO = "manage_repo"  # label setup, repo settings, invitations
+    LINK_PULL_REQUEST = "link_pull_request"  # edits a PR's description (M6.15)
+    PROPOSE_TEMPLATE = "propose_template"  # opens a PR adding a template (M6.16)
     LINK_FIRST_REPO = "link_first_repo"  # the linker becomes the workspace's admin
     LINK_REPO = "link_repo"
     UNLINK_REPO = "unlink_repo"
@@ -57,6 +59,9 @@ REQUIREMENTS: Mapping[Action, Requirement] = {
     Action.TRIAGE_ISSUE: Requirement(Role.MEMBER, RepoPermission.TRIAGE),
     Action.MERGE_PULL_REQUEST: Requirement(Role.MAINTAINER, RepoPermission.WRITE),
     Action.MANAGE_REPO: Requirement(Role.ADMIN, RepoPermission.ADMIN),
+    # GitHub lets people with write access edit any PR's description: the same here.
+    Action.LINK_PULL_REQUEST: Requirement(Role.MEMBER, RepoPermission.WRITE),
+    Action.PROPOSE_TEMPLATE: Requirement(Role.ADMIN, RepoPermission.WRITE),
     Action.LINK_FIRST_REPO: Requirement(Role.MEMBER, RepoPermission.WRITE),
     Action.LINK_REPO: Requirement(Role.ADMIN, RepoPermission.WRITE),
     Action.UNLINK_REPO: Requirement(Role.ADMIN, None),

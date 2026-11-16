@@ -6,12 +6,14 @@
           {
             "number": 12,
             "title": "feat(github): issues, labels, users and permissions via the GitHub App",
+            "body": "",
             "state": "MERGED",
             "isDraft": false,
             "url": "https://github.com/tekeufranck681/chirpo/pull/12",
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-issues",
             "baseRefName": "main",
+            "baseRepository": {"defaultBranchRef": {"name": "main"}},
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"
@@ -37,12 +39,14 @@
           {
             "number": 11,
             "title": "feat(github): GitHub App login, dev token fallback and setup guide",
+            "body": "",
             "state": "MERGED",
             "isDraft": false,
             "url": "https://github.com/tekeufranck681/chirpo/pull/11",
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-auth",
             "baseRefName": "main",
+            "baseRepository": {"defaultBranchRef": {"name": "main"}},
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"
@@ -68,12 +72,14 @@
           {
             "number": 10,
             "title": "feat(github): code host domain types, adapter contract and fake",
+            "body": "",
             "state": "MERGED",
             "isDraft": false,
             "url": "https://github.com/tekeufranck681/chirpo/pull/10",
             "mergeable": "UNKNOWN",
             "headRefName": "feat/github-core",
             "baseRefName": "main",
+            "baseRepository": {"defaultBranchRef": {"name": "main"}},
             "author": {
               "login": "tekeufranck681",
               "__typename": "User"

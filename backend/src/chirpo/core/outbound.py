@@ -12,6 +12,7 @@ the person confirming having read every character.
 import re
 
 from chirpo.core.context import clean
+from chirpo.core.links import GAP, KEYWORDS
 
 ZWSP = "\u200b"
 
@@ -19,7 +20,7 @@ ZWSP = "\u200b"
 _MENTION = re.compile(r"(?<!\w)@(?=\w)")
 # A closing keyword followed by an issue reference ("fixes #1", "closes: acme/api#2").
 _CLOSING = re.compile(
-    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?=\s*:?\s+(?:[\w.-]+/[\w.-]+)?#\d)",
+    rf"\b({KEYWORDS})(?={GAP}(?:[\w.-]+/[\w.-]+)?#\d)",
     re.IGNORECASE,
 )
 _MARKDOWN_SYNTAX = re.compile(r"[\\\[\]]")

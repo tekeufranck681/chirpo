@@ -22,11 +22,13 @@ from chirpo.core.actions import (
     CreateIssue,
     CreateIssues,
     IssueDraft,
+    LinkPullRequest,
     Proposal,
     RemoveLabels,
     ReopenIssue,
     SetStatus,
     UnassignIssue,
+    UnlinkPullRequest,
     permission_of,
 )
 from chirpo.core.commands.base import Services
@@ -42,6 +44,7 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import CodeHostError, CodeHostNotFoundError
+from chirpo.core.links import issue_ref, with_link, without_link
 from chirpo.core.outbound import neutralise, shown
 from chirpo.core.pending import Step
 from chirpo.core.permissions import Action
@@ -217,8 +220,16 @@ async def _guard(proposal: Proposal, repo: RepoRef, requester: Member, services:
     await _check(action, repo, requester, services)
 
 
-async def _check(action: Action, repo: RepoRef, requester: Member, services: Services) -> None:
-    """The asker's permission, the repo still being linked, and a write allowance, as of now."""
+async def _check(
+    action: Action,
+    repo: RepoRef,
+    requester: Member,
+    services: Services,
+    *,
+    writes: bool = True,
+) -> None:
+    """The asker's permission, the repo still being linked, and (when this step `writes` there)
+    a write allowance, as of now."""
     try:
         verdict = await services.permissions.check(requester, action, repo)
     except CodeHostError:
@@ -232,7 +243,7 @@ async def _check(action: Action, repo: RepoRef, requester: Member, services: Ser
         name = shown(requester.display_name, MAX_NAME)
         text = messages.STEP_NO_LONGER_ALLOWED.format(name=name)
         raise _Stop(text, code="not_allowed", result=AuditResult.DENIED)
-    if services.limits is not None:
+    if writes and services.limits is not None:
         limit = await services.limits.check_write(requester.id)
         if not limit.allowed:
             wait = messages.duration(limit.retry_after)
@@ -326,8 +337,81 @@ async def _run(
             issue = await _issue(proposal, repo, services)
             await host.update_issue(repo, issue.number, IssuePatch(state=IssueState.OPEN))
             run.lines.append(messages.DONE_REOPENED.format(issue=_ref(issue)))
+        case LinkPullRequest() | UnlinkPullRequest():
+            await _link(proposal, repo, requester, services, run)
         case _:
             raise _Stop(messages.STEP_BROKEN, code="invalid_step")
+
+
+EDIT_TRIES = 2  # GitHub can't update a description only if unchanged: re-read and check instead
+
+
+async def _link(
+    proposal: LinkPullRequest | UnlinkPullRequest,
+    repo: RepoRef,
+    requester: Member,
+    services: Services,
+    run: _Run,
+) -> None:
+    """Adds or removes the closing line for the issue in the PR's description (M6.15)."""
+    issue_repo = repo
+    if proposal.issue_repo is not None:
+        issue_repo = RepoRef.parse(repo.provider, proposal.issue_repo)
+        # Merging the PR will close that issue: only someone who may close it there may link it.
+        await _check(Action.TRIAGE_ISSUE, issue_repo, requester, services, writes=False)
+    issue = await _issue(proposal, issue_repo, services)
+    other = issue_repo.full_name if issue_repo != repo else None
+    refs = (issue_ref(issue.number, other), issue_ref(issue.number, issue_repo.full_name))
+    pull = await services.codehost.get_pull_request(repo, proposal.pull_request)
+    names = {"pull": pull.number, "repo": repo.full_name, "issue": _ref(issue, other)}
+    run.detail.update({"pull_request": pull.number, "issue": issue.number})
+    if isinstance(proposal, LinkPullRequest):
+        changed = await _edit_description(
+            repo, pull.number, lambda b: with_link(b, refs[0]), services
+        )
+        if pull.into_default:
+            text = messages.DONE_LINKED if changed else messages.DONE_ALREADY_LINKED
+        else:  # GitHub ignores closing keywords there (D65)
+            names["base"] = shown(pull.base_branch, MAX_NAME)
+            text = (
+                messages.DONE_LINKED_ELSEWHERE
+                if changed
+                else messages.DONE_ALREADY_LINKED_ELSEWHERE
+            )
+    else:
+        changed = await _edit_description(
+            repo, pull.number, lambda b: without_link(b, *refs), services
+        )
+        sidebar = not changed and other is None and issue.number in pull.closes_issues
+        text = (
+            messages.DONE_UNLINKED
+            if changed
+            else messages.DONE_LINKED_IN_SIDEBAR
+            if sidebar
+            else messages.DONE_NOT_LINKED
+        )
+    run.lines.append(text.format(**names))
+
+
+async def _edit_description(
+    repo: RepoRef, number: int, change: Callable[[str], str], services: Services
+) -> bool:
+    """Reads the description as it is now, writes the changed one, and reads it back. A save
+    that lands after ours is caught and the change (idempotent) is made again on that text; a
+    save in the moment between our read and write can't be seen, since GitHub has no
+    conditional update. False only when nothing was written."""
+    host = services.codehost
+    wrote = False
+    for _ in range(EDIT_TRIES):
+        body = (await host.get_pull_request(repo, number)).body
+        wanted = change(body)
+        if wanted == body:
+            return wrote  # a stale read-back already had our change: still ours
+        await host.update_pull_request_body(repo, number, wanted)
+        wrote = True
+        if (await host.get_pull_request(repo, number)).body == wanted:
+            return True
+    raise _Stop(messages.PR_KEPT_CHANGING.format(pull=number), code="edit_conflict")
 
 
 async def _create(draft: IssueDraft, repo: RepoRef, login: str, services: Services) -> Issue:
@@ -415,8 +499,9 @@ def _union(current: Sequence[str], added: Sequence[str]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _ref(issue: Issue) -> str:
-    return messages.DRY_ISSUE.format(number=issue.number, title=shown(issue.title, MAX_NAME))
+def _ref(issue: Issue, repo: str | None = None) -> str:
+    text = messages.DRY_ISSUE.format(number=issue.number, title=shown(issue.title, MAX_NAME))
+    return text + messages.DRY_IN_REPO.format(repo=repo) if repo else text
 
 
 def _created(issue: Issue) -> str:

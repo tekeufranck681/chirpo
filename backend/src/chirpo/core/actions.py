@@ -171,6 +171,29 @@ class ReopenIssue(OnIssue):
     pass
 
 
+class OnPullRequest(OnIssue):
+    """A pull request and an issue; `repo` is the pull request's repository."""
+
+    pull_request: int = Field(
+        ge=1, le=2**31 - 1, description="The pull request number, e.g. 15 for !15, PR 15 or PR #15."
+    )
+    issue_repo: Line | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="The issue's repository, only when the message names one other than the "
+        "pull request's.",
+    )
+
+
+class LinkPullRequest(OnPullRequest):
+    pass
+
+
+class UnlinkPullRequest(OnPullRequest):
+    pass
+
+
 class ListIssues(RepoScoped):
     state: IssueStateFilter = Field(default="open", description="Which issues to list.")
     assignee: Person | None = Field(default=None, description="Only issues assigned to them.")
@@ -269,6 +292,21 @@ _SPECS = (
     ),
     ActionSpec("close_issue", CloseIssue, "Close an issue.", Action.TRIAGE_ISSUE, True),
     ActionSpec("reopen_issue", ReopenIssue, "Reopen a closed issue.", Action.TRIAGE_ISSUE, True),
+    ActionSpec(
+        "link_pull_request",
+        LinkPullRequest,
+        "Link a pull request to the issue it fixes, so merging it closes the issue "
+        '("link !15 to #12", "PR 15 fixes #12").',
+        Action.LINK_PULL_REQUEST,
+        True,
+    ),
+    ActionSpec(
+        "unlink_pull_request",
+        UnlinkPullRequest,
+        "Remove the link between a pull request and an issue.",
+        Action.LINK_PULL_REQUEST,
+        True,
+    ),
     ActionSpec(
         "list_issues",
         ListIssues,

@@ -19,10 +19,12 @@ from chirpo.core.actions import (
     CreateIssues,
     IssueDraft,
     IssueRef,
+    LinkPullRequest,
     ListIssues,
     MyIssues,
     NotARequest,
     OnIssue,
+    OnPullRequest,
     Proposal,
     RemoveLabels,
     ReopenIssue,
@@ -32,7 +34,15 @@ from chirpo.core.actions import (
     UnassignIssue,
 )
 from chirpo.core.context import MAX_NAME, Team, clean
-from chirpo.core.domain import Issue, IssueQuery, IssueState, Milestone, RepoRef
+from chirpo.core.domain import (
+    Issue,
+    IssueQuery,
+    IssueState,
+    Milestone,
+    PullRequest,
+    PullRequestState,
+    RepoRef,
+)
 from chirpo.core.errors import CodeHostNotFoundError
 from chirpo.core.outbound import shown
 from chirpo.core.ports import CodeHostAdapter
@@ -78,6 +88,7 @@ class Resolved:
     ref: IssueRef | None = None  # how the model named the issue, before it became a number
     milestone: Milestone | None = None  # the sprint a list is limited to (M6.3)
     loose_repo: bool = False  # the repo was found by part of its name: asked before changes
+    pull: PullRequest | None = None  # the pull request a link is about (M6.15)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,11 +150,23 @@ class _Resolver:
         loose = proposal.repo is not None and not exact_repo_name(proposal.repo, repo)
         update: dict[str, object] = {"repo": repo.full_name}
         notes: list[str] = []
-        issue, ref, milestone = None, None, None
+        issue, ref, milestone, pull = None, None, None, None
+        issue_repo = repo
+        if isinstance(proposal, OnPullRequest):
+            pull = await self._pull_request(repo, proposal.pull_request)
+            if isinstance(proposal, LinkPullRequest) and not pull.into_default:
+                # GitHub ignores closing keywords there; the line still records the fix (D65)
+                base = shown(pull.base_branch, MAX_NAME)
+                notes.append(
+                    messages.PULL_REQUEST_NOT_INTO_DEFAULT.format(number=pull.number, base=base)
+                )
+            if proposal.issue_repo is not None:
+                issue_repo = await self._repo(proposal.issue_repo)
+            update["issue_repo"] = issue_repo.full_name if issue_repo != repo else None
         if isinstance(proposal, OnIssue):
             ref = proposal.issue
             issue = await self._issue(
-                repo, proposal.issue, closed=isinstance(proposal, ReopenIssue)
+                issue_repo, proposal.issue, closed=isinstance(proposal, ReopenIssue)
             )
             update["issue"] = IssueRef(number=issue.number)
         match proposal:
@@ -178,6 +201,7 @@ class _Resolver:
             ref=ref,
             milestone=milestone,
             loose_repo=loose,
+            pull=pull,
         )
 
     async def _milestone(self, repo: RepoRef, wanted: str) -> Milestone:
@@ -235,6 +259,18 @@ class _Resolver:
                 raise _NotAllowed
             self._readable.add(repo.key)
         return repo
+
+    async def _pull_request(self, repo: RepoRef, number: int) -> PullRequest:
+        try:
+            pull = await self.codehost.get_pull_request(repo, number)
+        except CodeHostNotFoundError:
+            raise _Unclear(
+                messages.PULL_REQUEST_NOT_FOUND.format(number=number, repo=repo.full_name)
+            ) from None
+        if pull.state != PullRequestState.OPEN:  # a link would never close anything now
+            state = messages.PULL_REQUEST_STATES[pull.state.value]
+            raise _Unclear(messages.PULL_REQUEST_NOT_OPEN.format(number=number, state=state))
+        return pull
 
     async def _issue(self, repo: RepoRef, ref: IssueRef, *, closed: bool) -> Issue:
         if ref.number is not None:

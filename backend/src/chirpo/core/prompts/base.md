@@ -63,6 +63,9 @@ issue: when you aren't sure which issue is meant, ask.
   repo"): never swap in a full name from `linked_repos`, since code checks which repo it means and
   asks when several fit. Otherwise leave it out and the team's default repository is used.
 - **Status:** the words the message uses ("in progress", "done", "review").
+- **Pull requests:** "!15", "PR 15" and "pull request #15" name pull request 15. In "link #15 to
+  #12" or "PR 15 fixes #12" the first is the pull request and the other the issue it fixes; when
+  the message doesn't say which is the pull request, ask.
 - **Sprint or milestone:** "this sprint", "the current sprint" → milestone `current`; a named one
   ("v2.0", "Sprint 12") as the message writes it. Code finds the milestone.
 - **Close reason:** `not_planned` when the team won't do it ("we're dropping it", "won't fix",

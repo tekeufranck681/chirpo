@@ -1,7 +1,9 @@
 """GitHub CodeHostAdapter: REST for issues and writes, GraphQL to read pull requests."""
 
+import base64
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
@@ -21,6 +23,7 @@ from chirpo.adapters.codehost.github.queries import GET_PULL_REQUEST, LIST_PULL_
 from chirpo.core.domain import (
     CheckStatus,
     CloseReason,
+    FileProposal,
     Issue,
     IssuePatch,
     IssueQuery,
@@ -38,6 +41,7 @@ from chirpo.core.domain import (
     same_login,
 )
 from chirpo.core.errors import (
+    CodeHostError,
     CodeHostForbiddenError,
     CodeHostNotFoundError,
     CodeHostValidationError,
@@ -49,6 +53,7 @@ PAGE_SIZE = 100
 MAX_ISSUE_PAGES = 5
 MAX_LABEL_PAGES = 10
 MAX_PULL_REQUEST_PAGES = 5
+TEMPLATE_FOLDERS = (".github", "", "docs")  # where GitHub looks for a PR template, in its order
 _CLOSE_REASONS = {reason.value for reason in CloseReason}
 _PERMISSIONS = {permission.value for permission in RepoPermission}
 # GitHub logins: letters, digits and single hyphens, max 39 characters; Apps end in [bot].
@@ -94,6 +99,17 @@ def _to_issue(repo: RepoRef, found: GitHubIssue | GitHubUpdatedIssue) -> Issue:
     )
 
 
+def _contents(repo: RepoRef, path: str) -> Callable[[GitHub[Any]], Awaitable[Response[Any, Any]]]:
+    url = f"/repos/{repo.owner}/{repo.name}/contents/{path}"
+    return lambda gh: gh.arequest("GET", url)
+
+
+def _into_default(node: dict[str, Any]) -> bool:
+    """Whether the PR targets the repo's default branch (unknown counts as yes)."""
+    default = ((node.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name")
+    return default is None or node["baseRefName"] == default
+
+
 def _iso(moment: datetime) -> Any:
     """GitHub's documented form, 2026-11-07T09:00:00Z; githubkit would send str(datetime)."""
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -125,6 +141,8 @@ def _to_pull_request(repo: RepoRef, node: dict[str, Any]) -> PullRequest:
         draft=node["isDraft"],
         mergeable=_MERGEABLE.get(node["mergeable"]),
         checks=checks,
+        body=node.get("body") or "",
+        into_default=_into_default(node),
         closes_issues=tuple(
             issue["number"]
             for issue in node["closingIssuesReferences"]["nodes"]
@@ -423,6 +441,132 @@ class GitHubAdapter:
         if not found.get("pullRequest"):
             raise CodeHostNotFoundError(f"{repo.full_name}!{number} is not a pull request")
         return _to_pull_request(repo, found["pullRequest"])
+
+    async def update_pull_request_body(self, repo: RepoRef, number: int, body: str) -> None:
+        await self._run(
+            repo,
+            f"edit the description of {repo.full_name}!{number}",
+            lambda gh: gh.rest.pulls.async_update(repo.owner, repo.name, number, body=body),
+        )
+
+    async def pull_request_template(self, repo: RepoRef) -> str | None:
+        """The repo's PR template, where GitHub looks for one: the root, `.github/` or `docs/`,
+        as a file (any case) or a folder of templates ("" then). None if there's none."""
+        for folder in TEMPLATE_FOLDERS:
+            try:
+                listing = await self._json(repo, f"list {folder or '/'}", _contents(repo, folder))
+            except CodeHostNotFoundError:
+                continue
+            for entry in listing if isinstance(listing, list) else ():
+                if entry.get("name", "").casefold() == "pull_request_template.md":
+                    found = await self._json(
+                        repo, "read the PR template", _contents(repo, entry["path"])
+                    )
+                    return base64.b64decode(found.get("content", "")).decode("utf-8", "replace")
+                if entry.get("name", "").casefold() == "pull_request_template":
+                    return ""
+        return None
+
+    async def propose_file(self, repo: RepoRef, proposal: FileProposal) -> str:
+        """Adds one file on its own branch and opens a pull request into the default branch;
+        returns its link. Never writes to the default branch. If the branch already has an open
+        PR (asked twice), that one is returned."""
+        info = await self._json(
+            repo,
+            f"read {repo.full_name}",
+            lambda gh: gh.arequest("GET", f"/repos/{repo.owner}/{repo.name}"),
+        )
+        base = info["default_branch"]
+        head = await self._json(
+            repo,
+            "read the default branch",
+            lambda gh: gh.arequest(
+                "GET", f"/repos/{repo.owner}/{repo.name}/git/ref/heads/{quote(base, safe='/')}"
+            ),
+        )
+        api = f"/repos/{repo.owner}/{repo.name}"
+        new_branch = True
+        try:
+            await self._json(
+                repo,
+                "create a branch",
+                lambda gh: gh.arequest(
+                    "POST",
+                    f"{api}/git/refs",
+                    json={"ref": f"refs/heads/{proposal.branch}", "sha": head["object"]["sha"]},
+                ),
+            )
+        except CodeHostValidationError:  # the branch exists: an earlier proposal
+            new_branch = False
+            pulls = await self._json(
+                repo,
+                "find the open PR",
+                lambda gh: gh.arequest(
+                    "GET",
+                    f"{api}/pulls",
+                    params={"head": f"{repo.owner}:{proposal.branch}", "state": "open"},
+                ),
+            )
+            if pulls:
+                return str(pulls[0]["html_url"])
+        content = base64.b64encode(proposal.content.encode()).decode()
+        try:
+            await self._json(
+                repo,
+                "add the file",
+                lambda gh: gh.arequest(
+                    "PUT",
+                    f"{api}/contents/{proposal.path}",
+                    json={
+                        "message": proposal.commit_message,
+                        "content": content,
+                        "branch": proposal.branch,
+                    },
+                ),
+            )
+        except CodeHostValidationError:
+            if new_branch:
+                await self._drop_branch(repo, proposal.branch)
+                raise
+            # the file is already on the earlier branch (its PR was closed): propose it again
+        except CodeHostError:
+            if new_branch:
+                await self._drop_branch(repo, proposal.branch)
+            raise
+        created = await self._json(
+            repo,
+            "open the pull request",
+            lambda gh: gh.arequest(
+                "POST",
+                f"/repos/{repo.owner}/{repo.name}/pulls",
+                json={
+                    "title": proposal.title,
+                    "head": proposal.branch,
+                    "base": base,
+                    "body": proposal.body,
+                },
+            ),
+        )
+        return str(created["html_url"])
+
+    async def _drop_branch(self, repo: RepoRef, branch: str) -> None:
+        """Tidies up a branch chirpo just made, when what was to go on it failed."""
+        with suppress(CodeHostError):
+            await self._run(
+                repo,
+                "delete the branch",
+                lambda gh: gh.arequest(
+                    "DELETE", f"/repos/{repo.owner}/{repo.name}/git/refs/heads/{branch}"
+                ),
+            )
+
+    async def _json(
+        self,
+        repo: RepoRef,
+        what: str,
+        request: Callable[[GitHub[Any]], Awaitable[Response[Any, Any]]],
+    ) -> Any:
+        return (await self._run(repo, f"{what} in {repo.full_name}", request)).json()
 
     async def merge_pull_request(
         self, repo: RepoRef, number: int, method: MergeMethod

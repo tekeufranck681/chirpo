@@ -20,6 +20,7 @@ Commands:
 /context on|off - keep recent messages so I understand follow-ups (admins)
 /personality off|light|playful - how chatty I am (admins)
 /settings - default repo, status labels, language, daily summary, timezone (admins change them)
+/templates pr [repo] - propose a pull request template that links issues (admins)
 
 Or just tell me what you need, mentioning me (in a private chat, just write):
 "{bot} checkout crashes on Android, give it to Franck"
@@ -185,6 +186,19 @@ TIMEZONE_UNKNOWN = (
     "or UTC."
 )
 DEFAULT_REPO_SET = "Done: {repo} is now the default repo."
+TEMPLATES_USAGE = (
+    "Usage: /templates pr proposes a pull request template with a Closes # line for the default "
+    "repo; /templates pr web for another linked one (admins)."
+)
+PR_TEMPLATE_PROPOSED = (
+    "Opened a pull request adding a PR template to {repo}, with a Closes # line so PRs link "
+    "their issue. Review and merge it on GitHub:\n{url}"
+)
+PR_TEMPLATE_EXISTS = "{repo} already has a pull request template."
+PR_TEMPLATE_EXISTS_NO_CLOSES = (
+    "{repo} already has a pull request template. It has no Closes # line: adding one makes PRs "
+    "link the issue they fix."
+)
 DEFAULT_REPO_ALREADY = "{repo} is already the default repo."
 STATUS_LABEL_SET = 'Done: the "{status}" status is now the label "{label}".'
 LABEL_RENAMED = '{repo}: renamed "{old}" to "{new}" on GitHub, on every issue that had it.'
@@ -281,6 +295,19 @@ DONE_UNDO_LABELS = "Put the labels on {issue} back as they were."
 DONE_ASSIGNED = "Assigned {people} to {issue}."
 DONE_UNASSIGNED = "Removed {people} from {issue}."
 DONE_STATUS = '{issue} is now "{status}".'
+DONE_LINKED = (
+    "Linked PR #{pull} ({repo}) to issue {issue}. GitHub closes the issue when the PR is merged."
+)
+DONE_ALREADY_LINKED = "PR #{pull} ({repo}) already closes issue {issue}: nothing to change."
+DONE_UNLINKED = "Unlinked PR #{pull} ({repo}) from issue {issue}."
+DONE_NOT_LINKED = "PR #{pull} ({repo}) doesn't link issue {issue}: nothing to change."
+DONE_LINKED_IN_SIDEBAR = (
+    "PR #{pull} ({repo}) is linked to issue {issue} from GitHub's sidebar, not its "
+    "description: remove it there."
+)
+PR_KEPT_CHANGING = (
+    "PR #{pull}'s description kept changing while I edited it. Try again in a moment."
+)
 DONE_ADDED_LABELS = "Added {labels} to {issue}."
 DONE_REMOVED_LABELS = "Removed {labels} from {issue}."
 DONE_COMMENTED = "Commented on {issue}.\n{url}"
@@ -308,6 +335,21 @@ PERSON_AMBIGUOUS = "Several people match {name}: {options}. Which one? Use their
 REPO_NOT_LINKED = "{name} isn't linked to this chat. Linked repos: {repos}."
 REPO_AMBIGUOUS = "Several linked repos are called {name}: {options}. Which one?"
 ISSUE_NOT_FOUND_NUMBER = "There's no issue #{number} in {repo}."
+PULL_REQUEST_NOT_FOUND = "There's no pull request #{number} in {repo}. Which one did you mean?"
+PULL_REQUEST_NOT_OPEN = "PR #{number} is already {state}, so linking it wouldn't close anything."
+PULL_REQUEST_STATES = {"closed": "closed", "merged": "merged"}
+PULL_REQUEST_NOT_INTO_DEFAULT = (
+    "PR #{number} goes into {base}, not the default branch: GitHub won't show this link or "
+    "close the issue when it merges"
+)
+DONE_LINKED_ELSEWHERE = (
+    "Added the closing line for issue {issue} to PR #{pull} ({repo}). It goes into {base}, not "
+    "the default branch, so GitHub won't link or close the issue."
+)
+DONE_ALREADY_LINKED_ELSEWHERE = (
+    "PR #{pull} ({repo}) already names issue {issue} with a closing keyword: nothing to change. "
+    "It goes into {base}, not the default branch, so GitHub won't link or close the issue."
+)
 ISSUE_NOT_FOUND = 'I can\'t find an open issue matching "{description}". Which issue number?'
 ISSUE_NOT_FOUND_CLOSED = (
     'I can\'t find a closed issue matching "{description}". Which issue number?'
@@ -339,6 +381,8 @@ DRY_DETAILS = '  details: "{text}"'
 DRY_ASSIGN = "• Assign {people} to {issue}"
 DRY_UNASSIGN = "• Remove {people} from {issue}"
 DRY_STATUS = '• Move {issue} to "{status}"'
+DRY_LINK = '• Link PR #{pull} "{title}" to {issue}, so merging it closes the issue'
+DRY_UNLINK = '• Unlink PR #{pull} "{title}" from {issue}'
 DRY_ADD_LABELS = "• Add {labels} to {issue}"
 DRY_REMOVE_LABELS = "• Remove {labels} from {issue}"
 DRY_COMMENT = '• Comment on {issue}: "{text}"'
